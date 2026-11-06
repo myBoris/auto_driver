@@ -6,6 +6,8 @@ __pycache__/
 runs/
 checkpoints/
 data/
+# AI 的数据处理源码需要提交，采集数据目录继续忽略。
+!AI/src/data/
 *.pt
 *.pth
 !.env.example
