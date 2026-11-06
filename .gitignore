@@ -8,12 +8,9 @@ checkpoints/
 data/
 *.pt
 *.pth
-.env
-.env.*
 !.env.example
 *.log
-terminal/.runtime/
-center/.runtime/
+.runtime/
 *.egg-info/
 build/
 dist/
