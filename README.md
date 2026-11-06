@@ -39,7 +39,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-浏览器打开 `http://中心电脑IP:8000`，页面自动连接并显示在线终端和游戏画面，无需输入口令或点击连接。浏览器会话由中心通过同源 HttpOnly Cookie 自动建立；配对口令只用于终端和训练程序。中心不依赖终端目录或根目录的 PyTorch 环境，本机 uv 启动方式见 [center/README.md](center/README.md)。
+中心默认通过 `CENTER_HOST=0.0.0.0` 监听所有 IPv4 网卡；本机浏览器打开 `http://localhost:8000`，其他电脑使用中心的任一可达 IP。页面自动连接并显示在线终端和游戏画面，无需输入口令或点击连接。浏览器会话由中心通过同源 HttpOnly Cookie 自动建立；配对口令只用于终端和训练程序。中心不依赖终端目录或根目录的 PyTorch 环境，本机 uv 启动方式见 [center/README.md](center/README.md)。
 
 ## Windows 游戏电脑
 
@@ -55,11 +55,13 @@ uv sync --locked
 uv run auto-driver-terminal --terminal-id game-pc
 ```
 
-两端启动入口会自动读取各自目录的 `.env`。终端默认通过 UDP 自动探测同网段中心，通常无需设置 `CENTER_URL`。Docker Desktop 部署时，可在中心 `.env` 设置 `CENTER_ADVERTISE_URL=http://中心电脑IP:8000`，让发现回复携带可访问的地址；广播受限或跨网段时也可直接指定：
+两端启动入口会自动读取各自目录的 `.env`。默认将中心的 `CENTER_ADVERTISE_URL` 留空，终端通过 UDP 自动探测同网段中心，使用回复的来源 IP 建立连接，无需固定局域网地址或设置 `CENTER_URL`。广播受限或跨网段时可直接指定：
 
 ```powershell
 uv run auto-driver-terminal --terminal-id game-pc --center http://中心电脑IP:8000
 ```
+
+反向代理或 NAT 需要固定连接入口时，才设置 `CENTER_ADVERTISE_URL`。它只指定探测回复公布的入口，不影响中心监听地址或访问来源；不要将 `0.0.0.0` 作为连接或通告地址。
 
 隐藏后台运行：
 

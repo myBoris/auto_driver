@@ -17,9 +17,11 @@ docker compose logs -f
 
 Linux Shell 可用 `cp .env.example .env`。Docker Compose 从本目录 `.env` 读取配置，镜像使用 uv 按 `uv.lock` 安装中心依赖。
 
-打开 `http://localhost:8000`，页面会自动连接中心并显示在线终端与游戏画面，无需输入口令或点击连接；远程浏览器使用中心电脑的实际 IP。默认 HTTP/WebSocket 为 TCP 8000，自动发现为 UDP 9999，中心防火墙需放行这两个端口。
+默认 `CENTER_HOST=0.0.0.0`，监听所有 IPv4 网卡。本机打开 `http://localhost:8000`，其他电脑使用中心的任一可达 IP；页面会自动连接并显示在线终端与游戏画面，无需输入口令或点击连接。默认 HTTP/WebSocket 为 TCP 8000，自动发现为 UDP 9999，中心防火墙需放行这两个端口。
 
-终端默认自动探测中心，无需配置 `CENTER_URL`。Docker Desktop、跨网段或反向代理环境下，可在中心 `.env` 设置 `CENTER_ADVERTISE_URL=http://中心电脑IP:8000`，确保探测回复公布的是终端能够访问的地址。如果收不到 UDP 回复，终端直接传 `--center http://中心电脑IP:8000`，或在 `terminal/.env` 配置 `CENTER_URL`。UDP 广播通常只覆盖同一网段。
+默认将 `CENTER_ADVERTISE_URL` 留空：终端使用 UDP 探测回复的来源 IP 连接中心，无需固定局域网地址或配置 `CENTER_URL`。UDP 广播通常只覆盖同一网段；跨网段或 Docker Desktop 收不到 UDP 回复时，终端直接传 `--center http://中心电脑IP:8000`，或在 `terminal/.env` 配置 `CENTER_URL`。
+
+`CENTER_ADVERTISE_URL` 仅用于反向代理或 NAT 场景下公布固定的可达入口，例如 `https://driver.example.com`；它不改变监听地址，也不限制访问来源。`0.0.0.0` 是监听通配地址，不能作为浏览器、终端的连接地址或通告地址。
 
 默认只运行一个中心实例；终端状态与最新画面保存在当前进程内存，不要启动多个独立 worker。重启中心后终端会自动重新连接，历史帧不会持久化。Windows 原生采集与恢复由终端独立子进程处理，见 [terminal/README.md](../terminal/README.md)。
 
