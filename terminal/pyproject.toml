@@ -15,11 +15,12 @@ dependencies = [
     "vgamepad>=0.2.0,<0.3 ; sys_platform == 'win32'",
     "windows-capture>=2.0.1,<3 ; sys_platform == 'win32'",
     "python-dotenv>=1,<2",
+    "imageio-ffmpeg>=0.6,<0.7",
 ]
 
 [project.scripts]
 auto-driver-terminal = "terminal.__main__:main"
 
 [tool.setuptools]
-packages = ["terminal"]
+packages = ["terminal", "terminal.config", "terminal.capture", "terminal.control", "terminal.network", "terminal.video", "terminal.services"]
 package-dir = {terminal = "."}

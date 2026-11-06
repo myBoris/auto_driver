@@ -40,7 +40,7 @@ if (Test-Path -LiteralPath $stopFile) {
     Remove-Item -LiteralPath $stopFile
 }
 
-# Start-Process joins ArgumentList; quote each argument using the Windows argv rules.
+# Start-Process 会拼接 ArgumentList，按 Windows argv 规则独立引用每个参数以保留空格。
 function ConvertTo-NativeArgument([string]$Value) {
     if ($Value -notmatch '[\s"]' -and $Value.Length -gt 0) { return $Value }
     $escaped = [regex]::Replace($Value, '(\\*)"', '$1$1\"')

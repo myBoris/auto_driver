@@ -6,7 +6,7 @@ import struct
 import time
 import unittest
 
-from aiohttp import WSMsgType
+from aiohttp import MultipartReader, WSMsgType
 from aiohttp.test_utils import TestClient, TestServer
 
 from center.app import SESSIONS, create_app
@@ -380,6 +380,26 @@ class ServiceTests(unittest.IsolatedAsyncioTestCase):
             response = await getattr(self.client, method)(path, headers=AUTH, json=body)
             self.assertEqual(response.status, 404)
             self.assertIn("error", await response.json())
+
+    async def test_diagnostic_stream_uses_cookie_and_ends_when_terminal_disconnects(self):
+        ws = await self.connect()
+        await self.send_frame(ws)
+        await self.wait_metadata(lambda data: data["frame_sequence"] == 1)
+        await self.client.get("/dashboard-session")
+        response = await self.client.get("/api/terminals/game-pc/stream")
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.headers["X-Accel-Buffering"], "no")
+        reader = MultipartReader.from_response(response)
+        first = await reader.next()
+        self.assertEqual(first.headers["X-Frame-Sequence"], "1")
+        self.assertEqual(await first.read(), JPEG)
+        await self.send_frame(ws)
+        second = await reader.next()
+        self.assertEqual(second.headers["X-Frame-Sequence"], "2")
+        self.assertEqual(await second.read(), JPEG)
+        await ws.close()
+        await asyncio.wait_for(response.content.read(), timeout=1)
+        response.close()
 
 
 if __name__ == "__main__":

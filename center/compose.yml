@@ -10,7 +10,24 @@ services:
       CENTER_PORT: 8000
       DISCOVERY_PORT: 9999
       CENTER_ADVERTISE_URL: ${CENTER_ADVERTISE_URL:-}
+      CENTER_MEDIA_ENABLED: "1"
+      CENTER_MEDIA_HTTP_URL: http://media:8889
+      CENTER_MEDIA_RTSP_PORT: 8554
+      CENTER_MEDIA_ICE_PORT: 8189
+      CENTER_MEDIA_ICE_HOST: ${CENTER_MEDIA_ICE_HOST:-}
     ports:
       - "8000:8000/tcp"
       - "9999:9999/udp"
     init: true
+    depends_on:
+      - media
+
+  media:
+    image: bluenviron/mediamtx:1.21.3
+    restart: unless-stopped
+    volumes:
+      - ./media/mediamtx.yml:/mediamtx.yml:ro
+    ports:
+      - "8554:8554/tcp"
+      - "8189:8189/udp"
+      - "8189:8189/tcp"

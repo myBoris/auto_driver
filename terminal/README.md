@@ -1,78 +1,79 @@
 # 游戏终端
 
-终端在运行《Forza Horizon 5》的 Windows 电脑上执行，使用 Windows Graphics Capture 采集游戏窗口，压缩 JPEG 后上传中心；操作经 `Python → vgamepad → ViGEmBus → 虚拟 Xbox 360 手柄 → 游戏` 执行。中心可以运行在另一台电脑或 Docker 中，终端需要直接访问 Windows 桌面和驱动，因此在 Windows 本机运行。
+终端在运行《Forza Horizon 5》的 Windows 电脑上执行。游戏窗口原始帧分成两条独立管道：硬件 H.264 视频经 RTSP 发布到中心的 MediaMTX，再由浏览器通过 WebRTC 播放；AI 观察按独立频率压缩为带采集时间戳的 JPEG，经已有认证 WebSocket 上传，继续支持 `frame` 和 `step` API。
+
+操作通过 `Python → vgamepad → ViGEmBus → 虚拟 Xbox 360 手柄 → 游戏` 执行。网络和手柄计时器运行在父进程，WGC、OpenCV 和视频发布运行在隔离子进程，采集崩溃或编码阻塞不会阻塞输入到期释放。
 
 ## 双击启动和关闭
 
-配置好本目录 `.env`，安装 uv 和 ViGEmBus 后，可以直接双击：
+安装 [uv](https://docs.astral.sh/uv/getting-started/installation/) 和 [ViGEmBus](https://github.com/nefarius/ViGEmBus/releases)，按驱动安装器要求重启。`terminal/` 可以单独复制到游戏电脑，不依赖项目其他目录。
 
-- `启动终端.cmd`：自动用 uv 准备依赖并在后台启动；已运行时会提示，不会重复启动。
-- `关闭终端.cmd`：释放手柄输入并关闭后台终端；已经关闭时也可以再次点击。
+1. 复制 `.env.example` 为 `.env`，将 `CENTER_TOKEN` 设为与中心 `.env` 相同的配对口令。
+2. 打开游戏，双击 `启动终端.cmd`。首次自动执行本目录 `uv sync --locked`，创建独立环境后隐藏运行；已运行时重复点击直接返回成功。
+3. 双击 `关闭终端.cmd`，停止发布和采集、释放手柄并退出。重复关闭也成功。
 
-首次启动需要联网下载依赖。失败时窗口会保留错误信息；正常启动后的日志位于 `.runtime/terminal.log`。游戏窗口出现后自动开始采集，中心连接和 60 FPS 配置均读取本目录 `.env`。
+正常日志位于 `.runtime/terminal.log`。失败时窗口保留错误信息；自动化可设置 `TERMINAL_LAUNCHER_NO_PAUSE=1` 禁止失败暂停。脚本校验 PID 和进程启动时间，不操作复用相同 PID 的其他进程。
 
-## 安装和前台验证
+默认通过 UDP 9999 自动发现中心，随后认证连接；口令不在 UDP 中广播。中心下发本终端的 RTSP 发布地址，断线撤销旧发布配置，重连后按新地址启动。跨子网或 Docker Desktop 广播受限时，在 `.env` 设置 `CENTER_URL=http://中心地址:8000`。多终端应使用不同的 `TERMINAL_ID`。
 
-要求 Windows 10/11、[uv](https://docs.astral.sh/uv/getting-started/installation/)，以及已安装的 [ViGEmBus](https://github.com/nefarius/ViGEmBus/releases)。安装驱动后按安装器要求重启。`terminal/` 可以单独复制到游戏电脑，不依赖项目其他目录。uv 按本目录 `.python-version` 使用 Python 3.12，按独立 `uv.lock` 安装依赖到本目录 `.venv`：
+## 视频和 AI 观察配置
+
+```dotenv
+TERMINAL_FPS=60
+TERMINAL_OBSERVATION_FPS=10
+TERMINAL_VIDEO_ENABLED=true
+TERMINAL_VIDEO_BITRATE=8M
+TERMINAL_VIDEO_ENCODER=auto
+```
+
+视频目标帧率默认 60，范围 1–120；AI JPEG 观察默认 10，范围同样为 1–120，两者独立。`8M` 表示每秒 8,000,000 bit 的视频目标码率。实际帧率取决于游戏渲染、图像尺寸、硬件和网络，配置值不是测量值。JPEG 质量只影响 AI 观察，不决定视频质量。
 
 ```powershell
 cd terminal
 uv sync --locked
-Copy-Item .env.example .env
-# 编辑 .env，让 CENTER_TOKEN 与中心 .env 中的口令一致。
-uv run auto-driver-terminal --terminal-id game-pc
+uv run auto-driver-terminal --fps 60 --observation-fps 10 --video-bitrate 8M
+# 可选提高视频目标，保持训练观察频率较低。
+uv run auto-driver-terminal --fps 120 --observation-fps 10
 ```
 
-默认目标采集帧率为 60 FPS，可配置范围为 1–120 FPS。在本目录 `.env` 设置 `TERMINAL_FPS=60`，或通过 `--fps` 覆盖；需要更高目标时可运行 `uv run auto-driver-terminal --fps 120`。
+默认 `auto` 实际编码测试帧，依次探测 `h264_nvenc`、`h264_qsv`、`h264_amf`；可用 `--video-encoder` 固定一种。失败明确显示在 `status.video.error`，不会静默切换软件 H.264。`status.video.ready` 只有在 FFmpeg 确实编码并发布帧后才为真，`encoder` 显示实际硬件实现。
 
-启动时自动读取本目录 `.env`，不依赖当前工作目录；已存在的进程环境变量优先。省略 `--center` 和 `.env` 的 `CENTER_URL` 时，终端在 UDP 9999 上广播探测，同时探测本机中心；探测回应通过随机 nonce 匹配，不包含口令。终端自动建立带 Bearer 认证的 WebSocket，断线后重新探测、重连。多台终端须使用不同的 `--terminal-id`，默认取本机主机名。可指定中心地址，绕过广播：
+FFmpeg 由 uv 依赖 `imageio-ffmpeg` 随环境安装，无需手动下载或配置系统 PATH。特殊环境可在 `.env` 设置 `FFMPEG_BINARY`，或传 `--ffmpeg-binary` 指向自己的可执行文件。硬件编码仍需对应显卡和驱动。RTSP 凭据只保存在运行配置中，状态和日志会脱敏。
 
-```powershell
-$env:CENTER_URL = "http://192.168.1.10:8000"
-uv run auto-driver-terminal --terminal-id game-pc --window-title "Forza Horizon 5" --fps 60 --width 1280 --jpeg-quality 75
-```
+不需要视频或无可用硬件时，显式设置 `TERMINAL_VIDEO_ENABLED=false` 或使用 `--no-video`，保留 JPEG 观察与控制 API。中心需部署 MediaMTX，并开放 RTSP TCP 8554、HTTP 8000 和配置的 WebRTC ICE 端口；媒体公网地址及 Docker UDP 映射由中心配置。
 
-先启动游戏，使用窗口化或无边框窗口；`--window-title` 为标题的子串，匹配忽略大小写。游戏窗口不存在或关闭时采集自动重试，状态会报错，不上传假画面。终端进程可以隐藏运行，不会主动切换窗口焦点；游戏是否失焦暂停、接受后台手柄输入取决于游戏设置。不要最小化游戏、锁屏或切换到非交互服务会话，否则采集可能停帧。需要游戏继续驾驶时，让游戏保持活动并渲染。
+## 采集与控制约束
 
-中心防火墙需允许 TCP 8000 和 UDP 9999，终端允许 UDP 探测回应；跨子网或 Docker Desktop 广播受限时使用 `CENTER_URL`。广播发现不传输口令，实际连接仍需认证。若使用 HTTP，适合可信局域网；通过 HTTPS 中心或反向代理可加密跨网络传输。两端系统时间需同步，过期指令会被拒绝。
+建议游戏使用窗口化或无边框模式。`--window-title` 是忽略大小写的标题子串，优先精确标题，默认排除 Steam 的 `[Streaming]` 启动窗口。终端不切换游戏焦点；游戏失焦是否暂停及接受手柄输入取决于游戏设置。最小化、锁屏或非交互会话可能停止游戏渲染，需要持续画面时保持用户登录且窗口继续渲染。
 
-## 隐藏后台运行
+原始像素在回调内复制到拥有内存的 BGR 图像，再交给视频及观察工作槽。两条管道都只保留最新待处理图像；编码器或网络慢时覆盖旧帧，避免排队累积延迟。FFmpeg 写管道由专用线程处理，采集回调不等待 RTSP。JPEG 只按观察频率编码，不再每个视频帧编码一次。
 
-先执行 `uv sync --locked`，然后在 `terminal/` 目录执行。脚本使用 uv 创建的本目录 `.venv\Scripts\pythonw.exe`，继承当前环境变量：
+每条动作完整替换手柄状态：`steering` 为 `[-1, 1]`，`throttle`、`brake` 为 `[0, 1]`；省略的轴归零，省略的按钮释放。`duration_ms` 默认 200，范围 0–5000，0 表示立即全部释放。支持 `A B X Y LB RB BACK START GUIDE LTHUMB RTHUMB DPAD_UP DPAD_DOWN DPAD_LEFT DPAD_RIGHT`。
 
-```powershell
-.\start.ps1 --terminal-id game-pc
-Get-Content .\.runtime\terminal.log -Tail 30
-.\stop.ps1
-```
+ACK 成功执行时间在驱动提交成功后记录；`step` 等待采集时间晚于动作保持时段的观察。独立计时器在到期时释放输入，旧计时器不会覆盖新动作；过期及同一连接内重复的命令会被拒绝。视频断流不伪造动作确认或观察时间戳。两端系统时间应同步。
 
-也可用 `-Python "C:\Python312\pythonw.exe"` 指定解释器。启动日志和 PID 记录保存在 `terminal/.runtime/`。停止脚本发出停止文件通知，终端先释放手柄、断开网络，再停止采集；脚本校验进程启动时间，避免操作复用 PID 的其他进程。此方式是登录用户桌面内的后台进程，需要用户保持登录。
+采集管理线程监督原生子进程，异常自动退避重启；发布地址或授权变化时停止旧子进程并立即重建。正常退出先协作停止；SDK 卡住时仅回收本终端拥有的采集与 FFmpeg 进程树，父进程继续负责输入释放。
 
-若 PowerShell 默认禁止本地脚本，可用单次进程参数运行，不需要修改系统执行策略：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\start.ps1 --terminal-id game-pc`；停止时将文件名改为 `stop.ps1`。
+视频发布另有独立进度看门狗：输入仍活跃时，首次 8 秒无输出或正常发布后 5 秒无帧进展，会终止卡住的编码器以解除管道写入阻塞，随后重新连接。停止终端后不会再次启动。Windows Job 将 FFmpeg 归属到采集进程，即使原生进程意外崩溃也会自动回收编码器，避免旧中心继续收到孤儿推流。
 
-## 操作约束
-
-每条操作完整替换手柄状态：`steering` 为 `[-1, 1]`，`throttle`、`brake` 为 `[0, 1]`，省略的轴归零，省略的 `buttons` 释放所有按钮。`duration_ms` 默认为 200，范围为 0–5000；0 表示立即全部释放。支持 `A B X Y LB RB BACK START GUIDE LTHUMB RTHUMB DPAD_UP DPAD_DOWN DPAD_LEFT DPAD_RIGHT`。持续驾驶时，AI 应在每条操作到期前继续发送新操作。
-
-独立于网络事件循环的计时器在操作到期时释放输入；断线、正常退出也释放输入。旧计时器不会释放新操作。已经过期或同一连接内重复的操作会被拒绝，不重放重连前的操作。硬件驱动执行失败会回传失败确认，中心可据此终止当前训练步骤。
-
-原生 Windows 捕获 SDK 在独立子进程内运行。子进程通过固定大小共享内存只保留一张最新 JPEG，状态通道也有容量上限；原生崩溃或长时间无响应时父进程自动重启采集子进程，网络连接和手柄计时器继续工作。采集使用实际可见窗口 HWND，默认排除 Steam 的 `[Streaming]` 启动窗口。停止时先请求子进程退出；若 SDK 卡住，只终止本终端创建的采集进程及其子进程。
-
-## 无硬件联调
+## 无游戏输入验证
 
 ```powershell
-uv run auto-driver-terminal --center http://127.0.0.1:8000 --terminal-id mock-pc --mock
+uv run auto-driver-terminal --mock --terminal-id video-qa
 uv run python -m unittest discover -s tests -v
 ```
 
-`--mock` 生成带时间戳的测试画面并使用内存手柄，不操作真实游戏。真实模式不会自动回退成模拟模式。通过中心页面或 API 可验证画面、执行确认、`step` 新观察和重连；真实游戏和手柄驱动仍需在游戏电脑上验证。
+`--mock` 仅把图像换成带帧号的合成图、手柄换成内存后端。启用视频时仍走实际硬件编码和 RTSP/WebRTC 链路，可检查 H.264、浏览器解码帧率、重连以及 AI API，同时不操作游戏。纯无硬件联调用 `--mock --no-video`。
 
-## 模块
+## 功能分层
 
-- `capture.py`：Windows 窗口采集、JPEG 编码和单帧缓存；网络变慢时不积压历史画面。
-- `control.py`：虚拟 Xbox 360 映射、参数校验、完整状态替换及输入超时释放。
-- `discovery.py`：UDP 自动发现和中心地址校验。
-- `client.py`：认证连接、画面上传、心跳、操作确认与断线重连。
-- `__main__.py`：CLI 入口；`uv run auto-driver-terminal --help` 查看参数。
+| 目录 | 职责 |
+| --- | --- |
+| `config/` | `.env`、CLI、连接配置及参数校验 |
+| `services/` | 组装并统一启动、退出各项服务 |
+| `capture/` | WGC/合成图像、原始帧分流、AI JPEG 采样、共享内存和进程监督 |
+| `video/` | 实际硬件探测、FFmpeg 最新帧写入、RTSP 发布、状态与凭据脱敏 |
+| `control/` | 动作协议、ViGEmBus 适配及独立输入计时器 |
+| `network/` | UDP 发现、认证 WebSocket、观察上传、心跳、动作 ACK 及重连 |
 
-二进制画面格式为 `b"ADF1" + struct.pack("!d", captured_at) + JPEG`，其中时间戳在终端采集回调内生成。`step` 可使用同一终端的操作执行时间与采集时间判断观察是否晚于操作保持时段。
+`__main__.py` 只保留入口，`client.py`、`discovery.py` 保留旧导入兼容。`terminal.capture` 和 `terminal.control` 是功能包，稳定导出原接口。AI 观察格式仍为 `b"ADF1" + struct.pack("!d", captured_at) + JPEG`，训练程序无需跟随视频协议改变。

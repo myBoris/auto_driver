@@ -1,0 +1,26 @@
+# 只提供终端 H.264 发布与浏览器 WebRTC；控制和训练仍由 center 负责。
+logLevel: warn
+authMethod: http
+authHTTPAddress: http://center:8000/internal/media/auth
+authHTTPExclude: []
+api: no
+metrics: no
+pprof: no
+playback: no
+rtmp: no
+hls: no
+srt: no
+rtsp: yes
+rtspAddress: :8554
+rtspTransports: [tcp]
+# 8889 仅供 center 在 Docker 内部代理 WHEP，不直接发布到主机。
+webrtc: yes
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: :8189
+webrtcIPsFromInterfaces: yes
+webrtcAdditionalHosts: []
+# host ICE 地址由中心按当前 HTTP 访问地址重写，无需固定网卡 IP。
+paths:
+  "~^terminal/[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$":
+    source: publisher

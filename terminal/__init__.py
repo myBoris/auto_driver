@@ -1,3 +1,3 @@
-"""Windows game capture and virtual Xbox controller terminal."""
+"""Windows 游戏终端：采集、硬件视频、AI 观察、手柄控制及中心连接。"""
 
 __version__ = "0.1.0"

@@ -17,8 +17,8 @@ auto-driver-center = "center.__main__:main"
 
 [tool.setuptools]
 include-package-data = false
-packages = ["center", "center.examples"]
+packages = ["center", "center.api", "center.api.v1", "center.configuration", "center.domain", "center.infrastructure", "center.services", "center.examples"]
 package-dir = {center = "."}
 
 [tool.setuptools.package-data]
-center = ["static/*.html"]
+center = ["static/*.html", "static/*.js", "static/*.css"]

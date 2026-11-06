@@ -1,0 +1,63 @@
+/* 页面样式模块：负责响应式监看布局、视频容器与倒 T 驾驶按钮。 */
+:root { font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; color: #e9eef4; background: #0a0e13; font-synthesis: none; --line: #26313e; --muted: #98a7b9; --green: #91ebba; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button, input, select { font: inherit; }
+    button, select { border: 1px solid var(--line); border-radius: 8px; color: inherit; background: #17202b; min-height: 42px; padding: 9px 12px; }
+    button { cursor: pointer; transition: background .12s, border-color .12s; }
+    button:hover:enabled { background: #263647; border-color: #557088; }
+    button:disabled, input:disabled { opacity: .45; cursor: default; }
+    button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #91ebba; outline-offset: 3px; }
+    header { border-bottom: 1px solid var(--line); padding: 23px max(24px, calc((100vw - 1440px) / 2)); display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .brand { font-size: 20px; font-weight: 750; letter-spacing: 2px; }
+    .brand span { color: var(--green); }
+    .subtitle { color: var(--muted); margin-top: 6px; font-size: 12px; letter-spacing: 1px; }
+    .pill { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; border: 1px solid var(--line); border-radius: 30px; padding: 8px 12px; white-space: nowrap; }
+    .dot { width: 7px; height: 7px; background: #768291; border-radius: 50%; }
+    .online .dot { background: var(--green); box-shadow: 0 0 10px #91ebba44; }
+    main { max-width: 1488px; margin: auto; padding: 25px 24px 40px; }
+    .connection { display: grid; grid-template-columns: minmax(200px, 1fr) auto; align-items: end; gap: 12px; padding: 18px; border: 1px solid var(--line); background: #101720; border-radius: 12px; margin-bottom: 20px; }
+    label.field { display: grid; gap: 8px; color: var(--muted); font-size: 12px; }
+    .field select { width: 100%; color: #e9eef4; font-size: 14px; }
+    .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
+    .panel { border: 1px solid var(--line); border-radius: 12px; background: #101720; overflow: hidden; }
+    .panel-heading { padding: 17px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); gap: 10px; }
+    h1, h2 { font-size: 15px; margin: 0; font-weight: 600; }
+    .eyebrow { font-size: 10px; color: var(--muted); letter-spacing: 1.5px; margin-bottom: 5px; }
+    .video { background: #060a0f; aspect-ratio: 16 / 9; position: relative; display: flex; align-items: center; justify-content: center; }
+    .video video { width: 100%; height: 100%; object-fit: contain; position: absolute; inset: 0; }
+    .placeholder { text-align: center; padding: 24px; color: var(--muted); }
+    .placeholder svg { display: block; margin: 0 auto 17px; color: #486079; }
+    .placeholder strong { display: block; color: #c6d1dd; margin-bottom: 10px; font-size: 16px; }
+    .placeholder p { margin: 0; line-height: 1.7; font-size: 13px; }
+    .frame-note { padding: 12px 20px; color: var(--muted); display: flex; justify-content: space-between; font-size: 12px; gap: 12px; }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border-top: 1px solid var(--line); }
+    .metric { padding: 18px 15px; background: #101720; min-width: 0; }
+    .metric .value { display: block; font-size: 19px; font-variant-numeric: tabular-nums; margin-bottom: 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .metric .label { color: var(--muted); font-size: 11px; }
+    .controls { padding: 18px; }
+    .control-hint { margin: 0 0 17px; font-size: 12px; color: var(--muted); line-height: 1.7; }
+    .drive-pad { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-areas: ". throttle ." "left brake right"; gap: 8px; }
+    .drive-pad button { min-height: 65px; touch-action: none; user-select: none; -webkit-user-select: none; padding: 8px 4px; }
+    .drive-pad [data-control='throttle'] { grid-area: throttle; }
+    .drive-pad [data-control='left'] { grid-area: left; }
+    .drive-pad [data-control='brake'] { grid-area: brake; }
+    .drive-pad [data-control='right'] { grid-area: right; }
+    .drive-pad button span { display: block; font-size: 10px; color: var(--muted); margin-top: 6px; }
+    button.held { border-color: var(--green); background: #224332; color: #bcfbd6; }
+    .setting { margin-top: 22px; }
+    .setting label { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
+    input[type=range] { width: 100%; margin: 12px 0 0; accent-color: var(--green); }
+    .buttons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin: 20px 0; }
+    .buttons button { min-height: 39px; font-size: 12px; touch-action: none; user-select: none; -webkit-user-select: none; padding: 6px; }
+    .keyboard { font-size: 12px; color: #b8c4d2; display: flex; gap: 9px; align-items: center; line-height: 1.5; }
+    .keyboard input { accent-color: var(--green); width: 16px; height: 16px; }
+    .release { width: 100%; margin-top: 20px; color: #ffb6b6; border-color: #734142; background: #301c23; font-weight: 650; }
+    .release:hover:enabled { background: #4b2630; border-color: #c87276; }
+    .status-box { border-top: 1px solid var(--line); padding: 15px 18px; font-size: 12px; color: var(--muted); line-height: 1.7; overflow-wrap: anywhere; }
+    .status-box strong { color: #cbd7e3; font-weight: 500; }
+    .notice { margin-top: 18px; min-height: 42px; padding: 12px 15px; font-size: 13px; border: 1px solid var(--line); background: #101720; border-radius: 8px; color: var(--muted); line-height: 1.6; }
+    .notice.error { color: #ffb6b6; border-color: #734142; background: #22151c; }
+    footer { margin-top: 20px; color: #6f8195; font-size: 11px; line-height: 1.8; }
+    @media (max-width: 1000px) { .workspace { grid-template-columns: minmax(0, 1fr) 280px; } .connection { grid-template-columns: minmax(150px, 1fr) auto; } }
+    @media (max-width: 740px) { header { padding: 20px 16px; } main { padding: 18px 16px 30px; } .workspace { grid-template-columns: 1fr; } .connection { padding: 14px; } .metric { padding: 14px 10px; } .metric .value { font-size: 16px; } .controls { padding: 18px 22px; } .drive-pad button { min-height: 58px; } .brand { font-size: 17px; } }

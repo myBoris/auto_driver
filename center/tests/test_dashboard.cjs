@@ -1,6 +1,5 @@
-// Browser event regressions using only Node's standard library.
-// These tests exercise dashboard handlers, not a browser or a real gamepad.
-// Run: node --test center/tests/test_dashboard.cjs
+// 使用 Node 标准库验证页面事件与 WebRTC 生命周期；不连接真实浏览器、视频中继或手柄。
+// 执行方式：node --test center/tests/test_dashboard.cjs
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -8,12 +7,11 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'static', 'index.html'), 'utf8');
-const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+const scripts = [...html.matchAll(/<script defer src="\/static\/([^"]+)"><\/script>/g)].map((match) => match[1]);
 const controlNames = [...html.matchAll(/data-control="([^"]+)"/g)].map((match) => match[1]);
 const names = ['throttle', 'left', 'brake', 'right', 'A', 'B', 'X', 'Y', 'LB', 'RB', 'BACK', 'START'];
 const ok = (body = {}) => ({ ok: true, status: 200, json: async () => body });
-const frameResponse = (sequence) => ({ ok: true, status: 200, blob: async () => new Blob(['jpeg'], { type: 'image/jpeg' }), headers: new Map([['X-Frame-Sequence', String(sequence)], ['X-Frame-Timestamp', '1700000000']]) });
-const framePath = (url) => new URL(url, 'http://dashboard.test').pathname.endsWith('/frame');
+const sdpResponse = (location = '/api/terminals/one/video/sessions/session-one') => ({ ok: true, status: 201, headers: new Map([['Location', location]]), text: async () => 'v=0\r\ns=answer\r\n' });
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
 const flush = async () => { for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve)); };
 
@@ -24,12 +22,17 @@ class Element {
     this.classList = { toggle(name, active) { if (active) classes.add(name); else classes.delete(name); }, contains(name) { return classes.has(name); } };
   }
   addEventListener(name, callback) { const callbacks = this.listeners.get(name) || []; callbacks.push(callback); this.listeners.set(name, callbacks); }
+  removeEventListener(name, callback) { this.listeners.set(name, (this.listeners.get(name) || []).filter((item) => item !== callback)); }
   setAttribute(name, value) { this.attributes.set(name, value); }
   removeAttribute(name) { this.attributes.delete(name); }
   closest() { return ['INPUT', 'SELECT', 'TEXTAREA'].includes(this.tagName) || this.contentEditable === 'true' ? this : null; }
   setPointerCapture(id) { this.pointerCapture = id; }
   replaceChildren() { this.options = []; }
   add(option) { this.options.push(option); }
+  pause() { this.paused = true; }
+  async play() { this.paused = false; }
+  requestVideoFrameCallback(callback) { this.videoCallback = callback; return 1; }
+  cancelVideoFrameCallback() { this.videoCallback = null; }
 }
 
 async function dashboard() {
@@ -37,8 +40,10 @@ async function dashboard() {
   const requestLog = [];
   const timers = new Map();
   const intervals = new Map();
+  const clock = { now: 1000 };
   let timerId = 0;
   const window = new Element('window');
+  window.location = { origin: 'http://dashboard.test' };
   const document = new Element('document');
   document.hidden = false;
   const controls = controlNames.map((name) => { const element = new Element(name, 'button'); element.dataset.control = name; return element; });
@@ -47,31 +52,47 @@ async function dashboard() {
   }
   document.getElementById = (id) => { if (!elements.has(id)) elements.set(id, new Element(id)); return elements.get(id); };
   document.querySelectorAll = () => controls;
-  const state = { handler: null, terminals: [] };
+  const state = { handler: null, terminals: [], video: { enabled: false, available: false, message: '测试中未启用视频' }, ice: 'complete', autoConnect: true, decoded: 0 };
+  const peers = [];
+  class Peer extends Element {
+    constructor() { super('peer'); this.connectionState = 'new'; this.iceGatheringState = state.ice; peers.push(this); }
+    addTransceiver(kind, options) { this.transceiver = { kind, options, setCodecPreferences(codecs) { this.codecs = codecs; } }; return this.transceiver; }
+    async createOffer() { return { type: 'offer', sdp: 'v=0\r\ns=offer\r\n' }; }
+    async setLocalDescription(value) { this.localDescription = value; }
+    async setRemoteDescription(value) {
+      this.remoteDescription = value;
+      if (state.autoConnect) {
+        this.connectionState = 'connected'; this.onconnectionstatechange?.();
+        this.track = new Element('track'); this.ontrack?.({ streams: [{ id: 'media-stream' }], track: this.track });
+      }
+    }
+    async getStats() { return new Map([['video', { type: 'inbound-rtp', kind: 'video', framesDecoded: state.decoded, frameWidth: 1280, frameHeight: 720 }]]); }
+    close() { this.connectionState = 'closed'; this.closed = true; this.onconnectionstatechange?.(); }
+    event(name) { for (const callback of this.listeners.get(name) || []) callback(); }
+  }
   const fetch = async (url, options = {}) => {
-    const request = { url, options, body: options.body ? JSON.parse(options.body) : undefined };
+    const request = { url, options, body: options.body && options.headers?.['Content-Type'] === 'application/json' ? JSON.parse(options.body) : options.body };
     requestLog.push(request);
     if (state.handler) {
       const result = state.handler(request);
       if (result !== undefined) return result;
     }
     if (url === '/api/terminals') return ok({ terminals: state.terminals });
-    if (framePath(url)) return new Promise((resolve, reject) => {
-      const abort = () => reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
-      if (options.signal?.aborted) abort(); else options.signal?.addEventListener('abort', abort, { once: true });
-    });
+    if (url.endsWith('/video')) return ok(state.video);
+    if (url.endsWith('/video/whep')) return sdpResponse();
     return ok();
   };
-  const context = vm.createContext({ document, window, Element, Option: class { constructor(text, value) { Object.assign(this, { text, value }); } }, AbortController, URL, performance, fetch,
-    setTimeout(callback, ms) { const id = ++timerId; timers.set(id, { callback, ms }); return id; },
+  const context = vm.createContext({ document, window, Element, Option: class { constructor(text, value) { Object.assign(this, { text, value }); } }, AbortController, AbortSignal, URL, performance: { now: () => clock.now }, fetch,
+    RTCPeerConnection: Peer, RTCRtpReceiver: { getCapabilities() { return { codecs: [{ mimeType: 'video/VP8' }, { mimeType: 'video/H264', sdpFmtpLine: 'packetization-mode=1' }] }; } }, MediaStream: class {},
+    setTimeout(callback, ms) { const id = ++timerId; timers.set(id, { callback, ms, at: clock.now + ms }); return id; },
     clearTimeout(id) { timers.delete(id); },
     setInterval(callback, ms) { intervals.set(ms, callback); },
   });
-  vm.runInContext(script, context, { filename: 'dashboard-inline.js' });
+  for (const name of scripts) vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'static', name), 'utf8'), context, { filename: name });
   await flush();
   state.terminals = [{ terminal_id: 'one', name: 'One', connected: true }, { terminal_id: 'two', name: 'Two', connected: true }];
-  context.seed = state.terminals;
-  vm.runInContext("terminals=seed;selected='one';centerOnline=true;syncControls();", context);
+  const app = window.autoDriverDashboard;
+  app.terminals = state.terminals; app.selected = 'one'; app.online = true; app.controls.sync();
   const emit = (target, type, fields = {}, bubble = true) => {
     const event = { target, button: 0, pointerId: 1, repeat: false, altKey: false, ctrlKey: false, metaKey: false, defaultPrevented: false, propagationStopped: false,
       preventDefault() { this.defaultPrevented = true; }, stopPropagation() { this.propagationStopped = true; }, ...fields };
@@ -79,14 +100,16 @@ async function dashboard() {
     if (bubble && target !== window && !event.propagationStopped && ['keydown', 'keyup'].includes(type)) for (const handler of window.listeners.get(type) || []) handler(event);
     return event;
   };
-  return { state, context, window, document, controls, requestLog, emit, get: document.getElementById, evaluate: (code) => vm.runInContext(code, context),
+  return { state, context, window, document, controls, requestLog, emit, app, peers, get: document.getElementById,
+    evaluate: (code) => vm.runInContext(code.replace(/\bheld\b/g, 'window.autoDriverDashboard.controls.held').replace(/\bselected\b/g, 'window.autoDriverDashboard.selected').replace(/\bcenterOnline\b/g, 'window.autoDriverDashboard.online').replace(/\bcenterFetch\(/g, 'window.autoDriverDashboard.api.fetch('), context),
     actions: () => requestLog.filter((request) => request.url.endsWith('/actions')),
-    frames: () => requestLog.filter((request) => framePath(request.url)),
+    sessions: () => requestLog.filter((request) => request.url.endsWith('/video/whep')),
     releases: () => requestLog.filter((request) => request.url.endsWith('/release')),
     press(name, id = 1) { return emit(controls.find((button) => button.dataset.control === name), 'pointerdown', { pointerId: id }); },
     lift(name, id = 1, type = 'pointerup') { return emit(controls.find((button) => button.dataset.control === name), type, { pointerId: id }); },
     interval: (ms) => intervals.get(ms)(),
-    dispose() { vm.runInContext('pageLeaving=true;selectionEpoch+=1;connectionEpoch+=1;if(frameAbort)frameAbort.abort();', context); },
+    advance(ms) { clock.now += ms; for (const [id, timer] of [...timers]) if (timer.at <= clock.now) { timers.delete(id); timer.callback(); } },
+    dispose() { app.leaving = true; app.player.stop(); },
   };
 }
 
@@ -255,39 +278,106 @@ test('cookie recovery sends the latest changed state instead of replaying the ol
   assert.equal(h.actions().length, 2); assert.equal(h.actions()[1].body.steering, -.7); assert.equal(h.evaluate('held.size'), 2); h.dispose();
 });
 
-test('restoring page from browser history restarts polling for same terminal', async () => {
-  const h = await dashboard(); h.emit(h.window, 'pagehide'); h.emit(h.window, 'pageshow'); await flush();
-  assert.equal(h.evaluate('centerOnline'), true); assert.ok(h.frames().some((request) => request.url.startsWith('/api/terminals/one/frame?'))); h.dispose();
+function enableVideo(h) { h.state.video = { enabled: true, available: true, codec: 'H264', whep_url: '/api/terminals/one/video/whep' }; }
+
+test('WHEP negotiates recvonly H264 and cleans up its session and peer', async () => {
+  const h = await dashboard(); enableVideo(h); h.app.syncVideo(); await flush();
+  assert.equal(h.peers.length, 1); const peer = h.peers[0];
+  assert.equal(peer.transceiver.options.direction, 'recvonly'); assert.deepEqual([...peer.transceiver.codecs].map((codec) => codec.mimeType), ['video/H264']);
+  assert.equal(h.sessions().length, 1); assert.equal(h.sessions()[0].options.headers['Content-Type'], 'application/sdp');
+  assert.equal(peer.remoteDescription.type, 'answer'); assert.ok(h.get('frame').srcObject);
+  h.dispose(); await flush(); assert.equal(peer.closed, true); assert.equal(h.get('frame').srcObject, null);
+  assert.ok(h.requestLog.some((request) => request.options.method === 'DELETE' && request.url.includes('/video/sessions/')));
 });
 
-test('frame loop waits for fresh sequence without duplicate requests or a fixed display timer', async () => {
-  const h = await dashboard(); const first = deferred(); let count = 0;
-  h.state.handler = (request) => { if (framePath(request.url) && ++count === 1) return first.promise; };
-  h.evaluate('void pollFrames(selectionEpoch,connectionEpoch)'); await flush();
-  assert.equal(h.frames().length, 1); assert.equal(new URL(h.frames()[0].url, 'http://dashboard.test').searchParams.get('timeout'), '3');
-  h.interval(100); await flush(); assert.equal(h.frames().length, 1, 'a pending frame request should not be duplicated');
-  first.resolve(frameResponse(41)); await flush();
-  assert.equal(h.frames().length, 2, 'next frame should be requested immediately after receiving a frame');
-  assert.equal(new URL(h.frames()[1].url, 'http://dashboard.test').searchParams.get('after'), '41');
-  assert.equal(h.get('sequence').textContent, '41');
-  h.dispose(); await flush(); assert.equal(h.frames()[1].options.signal.aborted, true);
+test('video unavailable is explicit and never falls back to JPEG polling', async () => {
+  const h = await dashboard(); h.app.syncVideo(); await flush();
+  assert.equal(h.peers.length, 0); assert.match(h.get('placeholder-detail').textContent, /测试中未启用视频/);
+  assert.equal(h.requestLog.some((request) => /\/frame(?:\?|$)|\/stream(?:\?|$)/.test(request.url)), false); h.dispose();
 });
 
-test('terminal selection cancels its pending long poll and starts the new terminal without an old cursor', async () => {
-  const h = await dashboard(); h.evaluate('void pollFrames(selectionEpoch,connectionEpoch)'); await flush();
-  const previous = h.frames()[0]; h.get('terminal').value = 'two'; h.emit(h.get('terminal'), 'change'); await flush();
-  assert.equal(previous.options.signal.aborted, true); assert.equal(h.frames().length, 2);
-  const next = new URL(h.frames()[1].url, 'http://dashboard.test'); assert.equal(next.pathname, '/api/terminals/two/frame'); assert.equal(next.searchParams.has('after'), false); h.dispose();
+test('ICE must complete before an offer is posted; timeout allows a later clean retry', async () => {
+  const h = await dashboard(); enableVideo(h); h.state.ice = 'gathering'; h.app.syncVideo(); await flush();
+  assert.equal(h.sessions().length, 0); h.advance(5000); await flush();
+  assert.match(h.get('placeholder-detail').textContent, /ICE/); assert.equal(h.sessions().length, 0);
+  h.state.ice = 'complete'; h.advance(1500); await flush(); assert.equal(h.sessions().length, 1); assert.equal(h.peers[0].closed, true); h.dispose();
 });
 
-test('a replacement session resets the frame cursor even if terminal online status never changes', async () => {
-  const h = await dashboard(); h.state.terminals[0].session_id = 'previous';
-  const first = deferred(); let count = 0;
-  h.state.handler = (request) => { if (framePath(request.url) && ++count === 1) return first.promise; };
-  h.evaluate('void pollFrames(selectionEpoch,connectionEpoch)'); await flush(); first.resolve(frameResponse(900)); await flush();
-  const pending = h.frames().at(-1); assert.equal(new URL(pending.url, 'http://dashboard.test').searchParams.get('after'), '900');
-  h.state.terminals = [{ terminal_id: 'one', name: 'One', connected: true, session_id: 'replacement' }, h.state.terminals[1]];
-  h.emit(h.get('refresh'), 'click'); await flush();
-  assert.equal(pending.options.signal.aborted, true); assert.equal(h.frames().length, 3);
-  assert.equal(new URL(h.frames().at(-1).url, 'http://dashboard.test').searchParams.has('after'), false); h.dispose();
+test('ICE gathering resumes negotiation after the completion event', async () => {
+  const h = await dashboard(); enableVideo(h); h.state.ice = 'gathering'; h.app.syncVideo(); await flush();
+  const peer = h.peers[0]; assert.equal(h.sessions().length, 0);
+  peer.iceGatheringState = 'complete'; peer.event('icegatheringstatechange'); await flush(); assert.equal(h.sessions().length, 1); h.dispose();
+});
+
+test('a late WHEP answer after selection cancellation deletes its old session', async () => {
+  const h = await dashboard(); enableVideo(h); const answer = deferred();
+  h.state.handler = (request) => request.url.endsWith('/video/whep') ? answer.promise : undefined;
+  h.app.syncVideo(); await flush(); const peer = h.peers[0]; const pending = h.sessions()[0];
+  h.app.select(''); answer.resolve(sdpResponse('/api/terminals/one/video/sessions/late')); await flush();
+  assert.equal(pending.options.signal.aborted, true); assert.equal(peer.closed, true); assert.equal(peer.remoteDescription, undefined);
+  assert.ok(h.requestLog.some((request) => request.options.method === 'DELETE' && request.url.endsWith('/late'))); h.dispose();
+});
+
+test('hidden/pagehide close video; visible/pageshow start a new peer', async () => {
+  const h = await dashboard(); enableVideo(h); h.app.syncVideo(); await flush();
+  const first = h.peers[0]; h.document.hidden = true; h.emit(h.document, 'visibilitychange'); await flush(); assert.equal(first.closed, true);
+  h.document.hidden = false; h.emit(h.document, 'visibilitychange'); await flush(); assert.equal(h.peers.length, 2);
+  h.emit(h.window, 'pagehide'); await flush(); assert.equal(h.peers[1].closed, true);
+  h.emit(h.window, 'pageshow'); await flush(); assert.equal(h.app.online, true); assert.equal(h.peers.length, 3); h.dispose();
+});
+
+test('a changed terminal session replaces video even if connected status stays true', async () => {
+  const h = await dashboard(); enableVideo(h); h.state.terminals[0].session_id = 'previous'; h.app.syncVideo(); await flush();
+  const previous = h.peers[0]; h.state.terminals = [{ terminal_id: 'one', name: 'One', connected: true, session_id: 'replacement' }, h.state.terminals[1]];
+  h.emit(h.get('refresh'), 'click'); await flush(); assert.equal(previous.closed, true); assert.equal(h.peers.length, 2); h.dispose();
+});
+
+test('failed peer reconnects and prolonged decoded-frame stall also reconnects', async () => {
+  const h = await dashboard(); enableVideo(h); h.app.syncVideo(); await flush();
+  h.peers[0].connectionState = 'failed'; h.peers[0].onconnectionstatechange(); h.advance(1500); await flush(); assert.equal(h.peers.length, 2);
+  const next = h.peers[1]; h.advance(9000); await flush(); assert.match(h.get('placeholder-detail').textContent, /没有新帧/);
+  h.advance(1500); await flush(); assert.equal(next.closed, true); assert.equal(h.peers.length, 3); h.dispose();
+});
+
+test('video FPS comes from presented frames while capture target remains separate', async () => {
+  const h = await dashboard(); enableVideo(h); h.state.terminals[0].capture = { fps: 60 }; h.app.renderTerminal(); h.app.syncVideo(); await flush();
+  h.get('frame').videoWidth = 1280; h.get('frame').videoHeight = 720;
+  h.state.decoded = 24; h.get('frame').videoCallback(0, { presentedFrames: 24 }); h.advance(1000); await flush();
+  assert.equal(h.get('fps').textContent, '24.0 FPS'); assert.equal(h.get('capture-fps').textContent, '60 FPS'); assert.equal(h.get('resolution').textContent, '1280 × 720');
+  assert.match(h.get('frame-time').textContent, /24/); assert.equal(h.get('placeholder').hidden, true); h.dispose();
+});
+
+test('cancelling ICE gathering never posts an offer and removes the waiting peer', async () => {
+  const h = await dashboard(); enableVideo(h); h.state.ice = 'gathering'; h.app.syncVideo(); await flush();
+  const peer = h.peers[0]; h.app.player.stop(); await flush(); peer.iceGatheringState = 'complete'; peer.event('icegatheringstatechange'); await flush();
+  assert.equal(peer.closed, true); assert.equal(h.sessions().length, 0); h.advance(6000); await flush(); assert.equal(h.peers.length, 1); h.dispose();
+});
+
+test('video metadata requests remain bounded even when they have a lifecycle signal', async () => {
+  const h = await dashboard(); let aborted = false;
+  h.state.handler = (request) => request.url.endsWith('/video') ? new Promise((_resolve, reject) => {
+    request.options.signal.addEventListener('abort', () => { aborted = true; reject(Object.assign(new Error('timeout'), { name: 'AbortError' })); });
+  }) : undefined;
+  h.app.syncVideo(); await flush(); h.advance(6000); await flush();
+  assert.equal(aborted, true); assert.equal(h.peers.length, 0); assert.match(h.get('placeholder-detail').textContent, /timeout/); h.dispose();
+});
+
+test('without presentation callbacks FPS uses measured decoded-frame deltas', async () => {
+  const h = await dashboard(); enableVideo(h); h.get('frame').requestVideoFrameCallback = undefined;
+  h.app.syncVideo(); await flush(); h.state.decoded = 17; h.advance(1000); await flush();
+  assert.equal(h.get('fps').textContent, '17.0 FPS'); assert.match(h.get('frame-time').textContent, /实际解码/); h.dispose();
+});
+
+test('decoded first frame reveals hidden video before a presentation callback can fire', async () => {
+  const h = await dashboard(); enableVideo(h); h.get('frame').hidden = true;
+  h.app.syncVideo(); await flush(); h.state.decoded = 1; h.advance(1000); await flush();
+  assert.equal(h.get('frame').hidden, false); assert.equal(h.get('placeholder').hidden, true);
+  assert.equal(h.get('fps').textContent, '0.0 FPS', '解码首帧不能冒充实际呈现帧率');
+  h.dispose();
+});
+
+test('ended video tracks schedule a new session rather than freezing on the last frame', async () => {
+  const h = await dashboard(); enableVideo(h); h.app.syncVideo(); await flush();
+  const peer = h.peers[0]; h.emit(peer.track, 'ended'); h.advance(1500); await flush();
+  assert.equal(peer.closed, true); assert.equal(h.peers.length, 2); h.dispose();
 });
