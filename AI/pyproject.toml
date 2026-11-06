@@ -1,10 +1,15 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "wzry"
+name = "auto-driver-ai"
 version = "0.1.0"
-description = "General-purpose PyTorch GPU training environment"
+description = "自动驾驶 AI 训练框架、数据采集和 Center API 接入"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "aiohttp>=3.10,<4",
+    "python-dotenv>=1,<2",
     "ipykernel>=7.4.0",
     "jupyterlab>=4.6.5",
     "matplotlib>=3.11.2",
@@ -21,6 +26,13 @@ dependencies = [
     "vgamepad>=0.2.0,<0.3 ; sys_platform == 'win32'",
     "windows-capture>=2.0.1,<3 ; sys_platform == 'win32'",
 ]
+
+[project.scripts]
+auto-driver-ai = "src.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src", "src.*"]
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu126" }
