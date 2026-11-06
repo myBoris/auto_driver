@@ -50,14 +50,29 @@ class TerminalClient:
             await asyncio.sleep(0.2)
 
     async def _frames(self, ws: aiohttp.ClientWebSocketResponse) -> None:
+        loop = asyncio.get_running_loop()
+        available = asyncio.Event()
+
+        def notify() -> None:
+            try:
+                loop.call_soon_threadsafe(available.set)
+            except RuntimeError:
+                # A final publish can race listener removal during loop shutdown.
+                pass
+
         previous_sequence = -1
-        while True:
-            frame = self.capture.latest()
-            if frame is not None and frame.sequence != previous_sequence and self.capture.status()["ready"]:
-                await ws.send_bytes(frame.packet())
-                previous_sequence = frame.sequence
-            # Capture owns pacing; poll quickly so a separate timer cannot skip frames.
-            await asyncio.sleep(0.005)
+        self.capture.add_frame_listener(notify)
+        try:
+            while True:
+                available.clear()
+                frame = self.capture.latest()
+                if frame is not None and frame.sequence != previous_sequence and self.capture.status()["ready"]:
+                    await ws.send_bytes(frame.packet())
+                    previous_sequence = frame.sequence
+                    continue
+                await available.wait()
+        finally:
+            self.capture.remove_frame_listener(notify)
 
     async def _heartbeat(self, ws: aiohttp.ClientWebSocketResponse, interval: float) -> None:
         while True:

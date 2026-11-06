@@ -27,8 +27,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--terminal-id", default=os.environ.get("TERMINAL_ID", default_id))
     parser.add_argument("--name", default=socket.gethostname())
     parser.add_argument("--window-title", default="Forza Horizon 5", help="case-insensitive game window title substring")
-    parser.add_argument("--fps", type=int, default=os.environ.get("TERMINAL_FPS", "30"),
-                        help="capture FPS; defaults to TERMINAL_FPS or 30")
+    parser.add_argument("--fps", type=int, default=os.environ.get("TERMINAL_FPS", "60"),
+                        help="capture FPS (1..120); defaults to TERMINAL_FPS or 60")
     parser.add_argument("--width", type=int, default=1280, help="maximum uploaded frame width")
     parser.add_argument("--jpeg-quality", type=int, default=75)
     parser.add_argument("--discovery-port", type=int, default=9999)
@@ -51,8 +51,8 @@ def main() -> None:
         parser.error("name must be 1..128 characters")
     if not args.window_title:
         parser.error("window-title must not be empty")
-    if not 1 <= args.fps <= 60 or not 160 <= args.width <= 3840 or not 1 <= args.jpeg_quality <= 95:
-        parser.error("fps must be 1..60, width 160..3840, jpeg-quality 1..95")
+    if not 1 <= args.fps <= 120 or not 160 <= args.width <= 3840 or not 1 <= args.jpeg_quality <= 95:
+        parser.error("fps must be 1..120, width 160..3840, jpeg-quality 1..95")
     if not 1 <= args.discovery_port <= 65535:
         parser.error("discovery-port must be 1..65535")
     if args.center:

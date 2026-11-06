@@ -12,6 +12,8 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 const controlNames = [...html.matchAll(/data-control="([^"]+)"/g)].map((match) => match[1]);
 const names = ['throttle', 'left', 'brake', 'right', 'A', 'B', 'X', 'Y', 'LB', 'RB', 'BACK', 'START'];
 const ok = (body = {}) => ({ ok: true, status: 200, json: async () => body });
+const frameResponse = (sequence) => ({ ok: true, status: 200, blob: async () => new Blob(['jpeg'], { type: 'image/jpeg' }), headers: new Map([['X-Frame-Sequence', String(sequence)], ['X-Frame-Timestamp', '1700000000']]) });
+const framePath = (url) => new URL(url, 'http://dashboard.test').pathname.endsWith('/frame');
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
 const flush = async () => { for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve)); };
 
@@ -54,7 +56,7 @@ async function dashboard() {
       if (result !== undefined) return result;
     }
     if (url === '/api/terminals') return ok({ terminals: state.terminals });
-    if (url.endsWith('/frame')) return new Promise((resolve, reject) => {
+    if (framePath(url)) return new Promise((resolve, reject) => {
       const abort = () => reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
       if (options.signal?.aborted) abort(); else options.signal?.addEventListener('abort', abort, { once: true });
     });
@@ -79,6 +81,7 @@ async function dashboard() {
   };
   return { state, context, window, document, controls, requestLog, emit, get: document.getElementById, evaluate: (code) => vm.runInContext(code, context),
     actions: () => requestLog.filter((request) => request.url.endsWith('/actions')),
+    frames: () => requestLog.filter((request) => framePath(request.url)),
     releases: () => requestLog.filter((request) => request.url.endsWith('/release')),
     press(name, id = 1) { return emit(controls.find((button) => button.dataset.control === name), 'pointerdown', { pointerId: id }); },
     lift(name, id = 1, type = 'pointerup') { return emit(controls.find((button) => button.dataset.control === name), type, { pointerId: id }); },
@@ -254,5 +257,37 @@ test('cookie recovery sends the latest changed state instead of replaying the ol
 
 test('restoring page from browser history restarts polling for same terminal', async () => {
   const h = await dashboard(); h.emit(h.window, 'pagehide'); h.emit(h.window, 'pageshow'); await flush();
-  assert.equal(h.evaluate('centerOnline'), true); assert.ok(h.requestLog.some((request) => request.url === '/api/terminals/one/frame')); h.dispose();
+  assert.equal(h.evaluate('centerOnline'), true); assert.ok(h.frames().some((request) => request.url.startsWith('/api/terminals/one/frame?'))); h.dispose();
+});
+
+test('frame loop waits for fresh sequence without duplicate requests or a fixed display timer', async () => {
+  const h = await dashboard(); const first = deferred(); let count = 0;
+  h.state.handler = (request) => { if (framePath(request.url) && ++count === 1) return first.promise; };
+  h.evaluate('void pollFrames(selectionEpoch,connectionEpoch)'); await flush();
+  assert.equal(h.frames().length, 1); assert.equal(new URL(h.frames()[0].url, 'http://dashboard.test').searchParams.get('timeout'), '3');
+  h.interval(100); await flush(); assert.equal(h.frames().length, 1, 'a pending frame request should not be duplicated');
+  first.resolve(frameResponse(41)); await flush();
+  assert.equal(h.frames().length, 2, 'next frame should be requested immediately after receiving a frame');
+  assert.equal(new URL(h.frames()[1].url, 'http://dashboard.test').searchParams.get('after'), '41');
+  assert.equal(h.get('sequence').textContent, '41');
+  h.dispose(); await flush(); assert.equal(h.frames()[1].options.signal.aborted, true);
+});
+
+test('terminal selection cancels its pending long poll and starts the new terminal without an old cursor', async () => {
+  const h = await dashboard(); h.evaluate('void pollFrames(selectionEpoch,connectionEpoch)'); await flush();
+  const previous = h.frames()[0]; h.get('terminal').value = 'two'; h.emit(h.get('terminal'), 'change'); await flush();
+  assert.equal(previous.options.signal.aborted, true); assert.equal(h.frames().length, 2);
+  const next = new URL(h.frames()[1].url, 'http://dashboard.test'); assert.equal(next.pathname, '/api/terminals/two/frame'); assert.equal(next.searchParams.has('after'), false); h.dispose();
+});
+
+test('a replacement session resets the frame cursor even if terminal online status never changes', async () => {
+  const h = await dashboard(); h.state.terminals[0].session_id = 'previous';
+  const first = deferred(); let count = 0;
+  h.state.handler = (request) => { if (framePath(request.url) && ++count === 1) return first.promise; };
+  h.evaluate('void pollFrames(selectionEpoch,connectionEpoch)'); await flush(); first.resolve(frameResponse(900)); await flush();
+  const pending = h.frames().at(-1); assert.equal(new URL(pending.url, 'http://dashboard.test').searchParams.get('after'), '900');
+  h.state.terminals = [{ terminal_id: 'one', name: 'One', connected: true, session_id: 'replacement' }, h.state.terminals[1]];
+  h.emit(h.get('refresh'), 'click'); await flush();
+  assert.equal(pending.options.signal.aborted, true); assert.equal(h.frames().length, 3);
+  assert.equal(new URL(h.frames().at(-1).url, 'http://dashboard.test').searchParams.has('after'), false); h.dispose();
 });

@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 LOG = logging.getLogger(__name__)
 MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -41,6 +41,7 @@ class LatestCapture:
         self._error: str | None = "waiting for first frame"
         self._stop = threading.Event()
         self._worker: threading.Thread | None = None
+        self._frame_listeners: set[Callable[[], None]] = set()
 
     def _publish(self, jpeg: bytes, captured_at: float, width: int, height: int) -> None:
         if len(jpeg) + 12 > MAX_FRAME_BYTES:
@@ -49,6 +50,17 @@ class LatestCapture:
             sequence = 1 if self._latest is None else self._latest.sequence + 1
             self._latest = CapturedFrame(sequence, captured_at, jpeg, width, height)
             self._error = None
+            listeners = tuple(self._frame_listeners)
+        for listener in listeners:
+            listener()
+
+    def add_frame_listener(self, listener: Callable[[], None]) -> None:
+        with self._lock:
+            self._frame_listeners.add(listener)
+
+    def remove_frame_listener(self, listener: Callable[[], None]) -> None:
+        with self._lock:
+            self._frame_listeners.discard(listener)
 
     def _set_error(self, message: str) -> None:
         with self._lock:
@@ -307,6 +319,8 @@ class WindowCapture(LatestCapture):
 
     def _run(self) -> None:
         context = multiprocessing.get_context("spawn")
+        # Read often enough for 120 FPS without imposing a second frame-rate cap.
+        poll_interval = min(0.005, 0.5 / self.fps)
         failures = 0
         while not self._stop.is_set():
             frames = _SharedFrameSlot(context)
@@ -323,7 +337,12 @@ class WindowCapture(LatestCapture):
                 sequence = 0
                 last_activity = time.monotonic()
                 previous_error = None
-                while not self._stop.wait(0.02):
+                while not self._stop.is_set():
+                    # Event.wait() rounds short timeouts to ~15.6 ms on Windows.
+                    # Python's high-resolution sleep keeps 120 FPS forwarding viable.
+                    time.sleep(poll_interval)
+                    if self._stop.is_set():
+                        break
                     if not process.is_alive():
                         raise RuntimeError(f"native capture worker exited ({process.exitcode})")
                     packet = frames.read_after(sequence)

@@ -294,6 +294,7 @@
         if (epoch !== connectionEpoch || pageLeaving) return;
         const wasOnline = centerOnline;
         const wasConnected = currentTerminal()?.connected;
+        const previousSession = currentTerminal()?.session_id;
         terminals = Array.isArray(body.terminals) ? body.terminals : [];
         centerOnline = true;
         const previous = selected;
@@ -304,7 +305,12 @@
         $('terminal').disabled = !terminals.length;
         $('terminal').value = next;
         selectTerminal(next);
-        if (previous === next && next && (!wasConnected || !wasOnline) && currentTerminal()?.connected) { selectionEpoch += 1; void pollFrames(selectionEpoch, connectionEpoch); }
+        const sessionChanged = previousSession && currentTerminal()?.session_id && previousSession !== currentTerminal().session_id;
+        if (previous === next && next && (!wasConnected || !wasOnline || sessionChanged) && currentTerminal()?.connected) {
+          selectionEpoch += 1;
+          if (frameAbort) frameAbort.abort();
+          void pollFrames(selectionEpoch, connectionEpoch);
+        }
         if (!next) notice('等待游戏终端上线，上线后将自动显示画面。');
         else if (!wasOnline) notice('已接入游戏终端。按住驾驶按钮发送操作。');
       } catch (error) {
@@ -321,14 +327,16 @@
       let lastSequence = '';
       while (epoch === selectionEpoch && connectionVersion === connectionEpoch && id === selected && !pageLeaving) {
         if (document.hidden) { await delay(300); continue; }
-        const started = performance.now();
         const controller = new AbortController(); frameAbort = controller;
         const timeout = setTimeout(() => controller.abort(), 5000);
         try {
-          const response = await centerFetch(`/api/terminals/${encodeURIComponent(id)}/frame`, { signal: controller.signal });
+          const cursor = lastSequence ? `&after=${encodeURIComponent(lastSequence)}` : '';
+          const response = await centerFetch(`/api/terminals/${encodeURIComponent(id)}/frame?timeout=3${cursor}`, { signal: controller.signal });
           if (!response.ok) {
             if (epoch !== selectionEpoch || connectionVersion !== connectionEpoch) break;
-            clearFrame(response.status === 503 ? '等待终端采集画面' : '画面暂不可用', response.status === 503 ? '请确认游戏窗口已打开，终端正在采集。' : '检查终端状态和网络连接，页面会自动重试。');
+            lastSequence = '';
+            const waiting = response.status === 503 || response.status === 504;
+            clearFrame(waiting ? '等待终端采集画面' : '画面暂不可用', waiting ? '请确认游戏窗口已打开，终端正在采集。' : '检查终端状态和网络连接，页面会自动重试。');
             $('stream-status').textContent = '等待画面';
             await delay(500); continue;
           }
@@ -348,11 +356,11 @@
           $('stream-status').textContent = '正在接收';
         } catch (error) {
           if (epoch !== selectionEpoch || connectionVersion !== connectionEpoch || pageLeaving) break;
+          lastSequence = '';
           clearFrame('画面连接中断', '正在重试，请检查终端是否在线。');
           $('stream-status').textContent = '正在重试';
           await delay(500);
         } finally { clearTimeout(timeout); if (frameAbort === controller) frameAbort = null; }
-        await delay(Math.max(0, 125 - (performance.now() - started)));
       }
     }
     $('refresh').addEventListener('click', () => { void refreshTerminals(); });

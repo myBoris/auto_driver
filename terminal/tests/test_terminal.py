@@ -7,9 +7,10 @@ import threading
 import time
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, call
+from unittest.mock import Mock, call, patch
 
-from terminal.capture import MockCapture, WindowCapture, _SharedFrameSlot
+from terminal.capture import LatestCapture, MockCapture, WindowCapture, _SharedFrameSlot
+from terminal.client import TerminalClient, TerminalConfig
 from terminal.control import Controller, MockGamepad, Xbox360Gamepad, normalize_action
 from terminal.discovery import DiscoveryProtocol, validate_center_url
 
@@ -143,6 +144,103 @@ class CaptureTests(unittest.TestCase):
         self.assertTrue(packet.endswith(b"\xff\xd9"))
         self.assertTrue(source.status()["ready"])
         self.assertEqual((frame.width, frame.height), (320, 180))
+
+
+class _RecordingFrameSocket:
+    def __init__(self, *, block_first=False):
+        self.entered = asyncio.Queue()
+        self.completed = asyncio.Queue()
+        self.packets = []
+        self.release_first = asyncio.Event()
+        if not block_first:
+            self.release_first.set()
+
+    async def send_bytes(self, packet):
+        first = not self.packets
+        self.packets.append(packet)
+        self.entered.put_nowait(packet)
+        if first:
+            await self.release_first.wait()
+        self.completed.put_nowait(packet)
+
+
+class FrameUploadTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.capture = LatestCapture(fps=120, width=320, quality=75)
+        self.controller = Controller(MockGamepad())
+        self.addCleanup(self.controller.close)
+        self.client = TerminalClient(
+            TerminalConfig(token="upload-test", terminal_id="upload-test", name="upload-test", mock=True),
+            self.capture, self.controller,
+        )
+
+    def publish(self, marker):
+        self.capture._publish(b"\xff\xd8" + marker + b"\xff\xd9", time.time(), 320, 180)
+        return self.capture.latest().packet()
+
+    async def next_packet(self, channel):
+        # This is a deadlock guard; delivery is synchronized by queue events, not FPS.
+        return await asyncio.wait_for(channel.get(), timeout=2)
+
+    async def cancel_upload(self, task):
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    async def flush_loop_callbacks(self):
+        completed = asyncio.get_running_loop().create_future()
+        asyncio.get_running_loop().call_soon(completed.set_result, None)
+        await completed
+
+    async def test_existing_and_thread_published_frames_send_and_cancellation_unsubscribes(self):
+        initial = self.publish(b"existing")
+        socket = _RecordingFrameSocket()
+        with patch.object(self.capture, "add_frame_listener", wraps=self.capture.add_frame_listener) as added, \
+                patch.object(self.capture, "remove_frame_listener", wraps=self.capture.remove_frame_listener) as removed:
+            task = asyncio.create_task(self.client._frames(socket))
+            self.addAsyncCleanup(self.cancel_upload, task)
+            self.assertEqual(await self.next_packet(socket.completed), initial)
+
+            def produce_from_thread():
+                return threading.get_ident(), self.publish(b"from-thread")
+
+            producer_thread, newest = await asyncio.to_thread(produce_from_thread)
+            self.assertNotEqual(producer_thread, threading.get_ident())
+            self.assertEqual(await self.next_packet(socket.completed), newest)
+            await self.cancel_upload(task)
+            self.assertTrue(task.cancelled())
+            added.assert_called_once()
+            removed.assert_called_once_with(added.call_args.args[0])
+
+            await asyncio.to_thread(self.publish, b"after-cancellation")
+            await self.flush_loop_callbacks()
+            self.assertEqual(socket.packets, [initial, newest])
+            self.assertTrue(socket.completed.empty())
+
+    async def test_blocked_upload_keeps_only_newest_frame_and_cleans_listener(self):
+        initial = self.publish(b"initial")
+        socket = _RecordingFrameSocket(block_first=True)
+        with patch.object(self.capture, "add_frame_listener", wraps=self.capture.add_frame_listener) as added, \
+                patch.object(self.capture, "remove_frame_listener", wraps=self.capture.remove_frame_listener) as removed:
+            task = asyncio.create_task(self.client._frames(socket))
+            self.addAsyncCleanup(self.cancel_upload, task)
+            self.assertEqual(await self.next_packet(socket.entered), initial)
+
+            def publish_while_blocked():
+                intermediate = self.publish(b"superseded")
+                newest = self.publish(b"newest")
+                return intermediate, newest
+
+            intermediate, newest = await asyncio.to_thread(publish_while_blocked)
+            self.assertEqual(socket.packets, [initial])
+            socket.release_first.set()
+            self.assertEqual(await self.next_packet(socket.completed), initial)
+            self.assertEqual(await self.next_packet(socket.completed), newest)
+            await self.flush_loop_callbacks()
+            self.assertEqual(socket.packets, [initial, newest])
+            self.assertNotIn(intermediate, socket.packets)
+
+            await self.cancel_upload(task)
+            removed.assert_called_once_with(added.call_args.args[0])
 
 
 def _crashing_capture_worker(config, frames, channel, stop):
