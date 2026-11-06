@@ -1,0 +1,13 @@
+.venv
+.git
+**/__pycache__
+*.pyc
+.env
+data
+runs
+checkpoints
+tests
+dist
+build
+*.egg-info
+.runtime

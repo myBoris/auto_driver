@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "auto-driver-center"
+version = "0.1.0"
+description = "Standalone game terminal discovery, video and training API service"
+requires-python = ">=3.12,<3.13"
+dependencies = ["aiohttp>=3.10,<4", "python-dotenv>=1,<2"]
+
+[project.optional-dependencies]
+examples = ["pillow>=10,<14"]
+
+[project.scripts]
+auto-driver-center = "center.__main__:main"
+
+[tool.setuptools]
+include-package-data = false
+packages = ["center", "center.examples"]
+package-dir = {center = "."}
+
+[tool.setuptools.package-data]
+center = ["static/*.html"]

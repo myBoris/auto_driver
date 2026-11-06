@@ -1,0 +1,16 @@
+services:
+  center:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      CENTER_TOKEN: ${CENTER_TOKEN:?Set CENTER_TOKEN in .env first}
+      CENTER_HOST: 0.0.0.0
+      CENTER_PORT: 8000
+      DISCOVERY_PORT: 9999
+      CENTER_ADVERTISE_URL: ${CENTER_ADVERTISE_URL:-}
+    ports:
+      - "8000:8000/tcp"
+      - "9999:9999/udp"
+    init: true
