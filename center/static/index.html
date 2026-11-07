@@ -13,53 +13,152 @@
 </head>
 <body>
   <header>
-    <div><div class="brand">AUTO <span>DRIVER</span></div><div class="subtitle">自动驾驶服务中心 / FORZA HORIZON 5</div></div>
-    <div class="pill" id="connection-status" role="status"><span class="dot"></span><span id="connection-text">等待连接</span></div>
+    <div class="brand">AUTO <span>DRIVER</span></div>
+    <div class="subtitle">远程驾驶工作台 <span>FORZA HORIZON 5</span></div>
   </header>
   <main>
-    <div class="connection">
-      <label class="field" for="terminal">游戏终端<select id="terminal" disabled><option value="">等待终端上线</option></select></label>
-      <button type="button" id="refresh">刷新终端</button>
-    </div>
+    <section class="session-overview panel" aria-label="终端连接与实时状态">
+      <div class="terminal-section">
+        <div class="terminal-caption">
+          <label for="terminal">游戏终端</label>
+          <span class="terminal-counts"><span class="online-count"><strong id="online-count">0</strong> 在线</span><span class="count-divider">/</span><span><strong id="terminal-count">0</strong> 终端</span></span>
+        </div>
+        <div class="terminal-picker">
+          <select id="terminal" disabled><option value="">等待终端上线</option></select>
+          <button type="button" id="refresh" class="icon-button" aria-label="刷新终端" title="刷新终端"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 6.1A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.9 5.9"/></svg></button>
+        </div>
+      </div>
+      <dl class="metrics">
+        <div class="metric"><dt>播放帧率</dt><dd id="fps" title="浏览器实际播放帧率">—</dd></div>
+        <div class="metric"><dt>采集目标</dt><dd id="capture-fps" title="终端配置的目标帧率">—</dd></div>
+        <div class="metric"><dt>分辨率</dt><dd id="resolution">—</dd></div>
+        <div class="metric"><dt>控制指令</dt><dd id="command-status">待命</dd></div>
+      </dl>
+      <div class="connection-summary">
+        <span id="connection-status" class="connection-state" role="status"><span class="dot"></span><span id="connection-text">正在连接中心</span></span>
+        <span class="pill" id="stream-status">未连接</span>
+        <span class="hardware-status" id="hardware-status" role="status">等待终端连接</span>
+      </div>
+    </section>
     <div class="workspace">
-      <section class="panel" aria-label="实时游戏画面">
-        <div class="panel-heading"><div><div class="eyebrow">LIVE OBSERVATION</div><h1 id="terminal-name">游戏画面</h1></div><span class="pill" id="stream-status">未连接</span></div>
+      <section id="video-panel" class="panel video-panel" aria-label="实时游戏画面">
+        <div class="panel-heading"><div class="video-title"><span class="live-mark" aria-hidden="true"></span><h1 id="terminal-name">游戏画面</h1></div><span class="heading-note">实时画面</span></div>
         <div class="video">
           <div class="placeholder" id="placeholder"><svg width="52" height="42" viewBox="0 0 52 42" fill="none" aria-hidden="true"><rect x="2" y="2" width="48" height="31" rx="4" stroke="currentColor" stroke-width="2"/><path d="M17 40h18M26 33v7M20 13l13 6-13 6V13Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg><strong id="placeholder-title">等待游戏画面</strong><p id="placeholder-detail">终端上线后，画面会自动显示。</p></div>
           <video id="frame" autoplay muted playsinline aria-label="游戏终端实时视频" hidden></video>
         </div>
         <div class="frame-note"><span id="frame-time">尚未接收视频</span><span>H.264 · WebRTC</span></div>
-        <div class="metrics">
-          <div class="metric"><span class="value" id="resolution">—</span><span class="label">画面尺寸</span></div>
-          <div class="metric"><span class="value" id="fps">—</span><span class="label">播放帧率（实测）</span></div>
-          <div class="metric"><span class="value" id="capture-fps">—</span><span class="label">采集目标帧率</span></div>
-          <div class="metric"><span class="value" id="command-status">待命</span><span class="label">手柄指令</span></div>
-        </div>
       </section>
-      <aside class="panel" aria-label="手动控制">
-        <div class="panel-heading"><div><div class="eyebrow">MANUAL CONTROL</div><h2>驾驶控制</h2></div><span aria-hidden="true">↗</span></div>
+      <aside class="panel control-panel" aria-label="手动驾驶控制">
+        <div class="panel-heading"><h2>驾驶控制</h2><span class="heading-note">选择一种方式开始</span><span id="control-mode-status" class="sr-only">键盘模式</span></div>
         <div class="controls">
-          <p class="control-hint">按住发送操作，松开释放。每条操作自动到期；离开页面或窗口失焦时释放输入。</p>
-          <div class="drive-pad">
-            <button type="button" class="drive" data-control="throttle" disabled>↑ 油门<span>W / ↑</span></button>
-            <button type="button" class="drive" data-control="left" disabled>← 左转<span>A / ←</span></button>
-            <button type="button" class="drive" data-control="brake" disabled>↓ 刹车<span>S / ↓</span></button>
-            <button type="button" class="drive" data-control="right" disabled>右转 →<span>D / →</span></button>
+          <div class="mode-tabs" role="tablist" aria-label="选择控制方式">
+            <button type="button" id="mode-keyboard" role="tab" data-mode="keyboard" aria-controls="panel-keyboard" aria-selected="true" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M5 9h2m2 0h2m2 0h2m2 0h2M5 12h2m2 0h2m2 0h2m2 0h2M7 15h10"/></svg>键盘</button>
+            <button type="button" id="mode-gamepad" role="tab" data-mode="gamepad" aria-controls="panel-gamepad" aria-selected="false" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M7 6h10c3 0 4 4 5 10 .5 3-2 4-4 1l-2-2H8l-2 2c-2 3-4.5 2-4-1 1-6 2-10 5-10Z"/><path d="M5 10h6m-3-3v6m9-4h.01m2 3h.01" stroke-linecap="round"/></svg>手柄</button>
+            <button type="button" id="mode-racing" role="tab" data-mode="racing" aria-controls="panel-racing" aria-selected="false" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><path d="m4 8 6 3m10-3-6 3m-2 3v7"/></svg>赛车模拟</button>
           </div>
-          <div class="setting"><label for="throttle-level">油门强度 <output id="throttle-value">60%</output></label><input id="throttle-level" type="range" min="0" max="100" value="60"></div>
-          <div class="setting"><label for="steering-level">转向幅度 <output id="steering-value">70%</output></label><input id="steering-level" type="range" min="0" max="100" value="70"></div>
-          <div class="buttons" aria-label="手柄按键">
-            <button type="button" class="drive" data-control="A" disabled>A</button><button type="button" class="drive" data-control="B" disabled>B</button><button type="button" class="drive" data-control="X" disabled>X</button><button type="button" class="drive" data-control="Y" disabled>Y</button>
-            <button type="button" class="drive" data-control="LB" disabled>LB</button><button type="button" class="drive" data-control="RB" disabled>RB</button><button type="button" class="drive" data-control="BACK" disabled>BACK</button><button type="button" class="drive" data-control="START" disabled>START</button>
+          <section id="panel-keyboard" class="mode-panel" role="tabpanel" aria-labelledby="mode-keyboard" data-mode-panel="keyboard">
+            <div class="keyboard-intro"><label class="keyboard"><input type="checkbox" id="keyboard">启用键盘</label><span>WASD / 方向键</span></div>
+            <div class="keyboard-driving">
+              <div class="drive-pad keyboard-pad">
+                <button type="button" class="drive" data-control="throttle" data-input-mode="keyboard" disabled><kbd>W</kbd><span>↑ 油门</span></button>
+                <button type="button" class="drive" data-control="left" data-input-mode="keyboard" disabled><kbd>A</kbd><span>← 左转</span></button>
+                <button type="button" class="drive" data-control="brake" data-input-mode="keyboard" disabled><kbd>S</kbd><span>↓ 刹车</span></button>
+                <button type="button" class="drive" data-control="right" data-input-mode="keyboard" disabled><kbd>D</kbd><span>右转 →</span></button>
+              </div>
+              <div class="keyboard-aux">
+                <button type="button" class="drive clutch-key" data-control="clutch" data-input-mode="keyboard" disabled><kbd>C</kbd><span>离合</span></button>
+                <div class="shift-buttons"><button type="button" class="drive" data-control="X" data-input-mode="keyboard" disabled><kbd>Q</kbd> 降挡</button><button type="button" class="drive" data-control="B" data-input-mode="keyboard" disabled><kbd>E</kbd> 升挡</button></div>
+              </div>
+            </div>
+            <div class="keyboard-settings steering-level-setting">
+              <div class="setting"><label for="steering-level">转向 <output id="steering-value">70%</output></label><input id="steering-level" type="range" min="0" max="100" value="70"></div>
+            </div>
+            <details class="key-strengths"><summary>按键力度 <span>W / S / C</span></summary><div class="keyboard-settings">
+              <div class="setting"><label for="throttle-level">油门 <output id="throttle-value">60%</output></label><input id="throttle-level" type="range" min="0" max="100" value="60"></div>
+              <div class="setting"><label for="brake-level">刹车 <output id="brake-value">100%</output></label><input id="brake-level" type="range" min="0" max="100" value="100"></div>
+              <div class="setting"><label for="clutch-level">离合 <output id="clutch-value">100%</output></label><input id="clutch-level" type="range" min="0" max="100" value="100"></div>
+            </div></details>
+          </section>
+          <section id="panel-gamepad" class="mode-panel" role="tabpanel" aria-labelledby="mode-gamepad" data-mode-panel="gamepad" hidden>
+            <div class="device-info">
+              <div class="gamepad-device"><span class="dot" aria-hidden="true"></span><span id="gamepad-status">屏幕手柄可用</span></div>
+              <details class="extra-controls"><summary>更多按键</summary><div class="gamepad-extras">
+                <p class="device-name" id="gamepad-name">实体手柄：等待连接</p>
+                <div class="gamepad-secondary">
+                  <div class="dpad" aria-label="方向按键">
+                    <button type="button" class="drive dpad-up" data-control="DPAD_UP" data-input-mode="gamepad" aria-label="方向键上" disabled>↑</button>
+                    <button type="button" class="drive dpad-left" data-control="DPAD_LEFT" data-input-mode="gamepad" aria-label="方向键左" disabled>←</button>
+                    <button type="button" class="drive dpad-down" data-control="DPAD_DOWN" data-input-mode="gamepad" aria-label="方向键下" disabled>↓</button>
+                    <button type="button" class="drive dpad-right" data-control="DPAD_RIGHT" data-input-mode="gamepad" aria-label="方向键右" disabled>→</button>
+                  </div>
+                  <div class="thumb-buttons"><button type="button" class="drive" data-control="LTHUMB" data-input-mode="gamepad" disabled>LS</button><button type="button" class="drive" data-control="RTHUMB" data-input-mode="gamepad" disabled>RS</button></div>
+                </div>
+                <div class="system-buttons"><button type="button" class="drive" data-control="BACK" data-input-mode="gamepad" disabled>BACK</button><button type="button" class="drive" data-control="GUIDE" data-input-mode="gamepad" disabled>GUIDE</button><button type="button" class="drive" data-control="START" data-input-mode="gamepad" disabled>START</button></div>
+              </div></details>
+            </div>
+            <div class="gamepad-triggers">
+              <button type="button" class="drive" data-control="brake" data-input-mode="gamepad" disabled>LT<span>刹车 <output id="gamepad-brake">0%</output></span></button>
+              <button type="button" class="drive" data-control="LB" data-input-mode="gamepad" disabled>LB<span>离合</span></button>
+              <button type="button" class="drive" data-control="RB" data-input-mode="gamepad" disabled>RB</button>
+              <button type="button" class="drive" data-control="throttle" data-input-mode="gamepad" disabled>RT<span>油门 <output id="gamepad-throttle">0%</output></span></button>
+            </div>
+            <div class="gamepad-main">
+              <div class="virtual-stick"><span class="mini-label">转向 <output id="gamepad-steering">0%</output></span><div class="steer-buttons"><button type="button" class="drive" data-control="left" data-input-mode="gamepad" aria-label="摇杆向左" disabled>←</button><button type="button" class="drive" data-control="right" data-input-mode="gamepad" aria-label="摇杆向右" disabled>→</button></div></div>
+              <div class="face-buttons" aria-label="手柄面板按键">
+                <button type="button" class="drive face-y" data-control="Y" data-input-mode="gamepad" disabled>Y</button>
+                <button type="button" class="drive face-x" data-control="X" data-input-mode="gamepad" disabled>X</button>
+                <button type="button" class="drive face-b" data-control="B" data-input-mode="gamepad" disabled>B</button>
+                <button type="button" class="drive face-a" data-control="A" data-input-mode="gamepad" disabled>A</button>
+              </div>
+            </div>
+            <p class="control-note gamepad-note">RT / LT 按住踩满，松开释放；实体手柄可调节力度。</p>
+          </section>
+          <section id="panel-racing" class="mode-panel" role="tabpanel" aria-labelledby="mode-racing" data-mode-panel="racing" hidden>
+            <div class="wheel-control">
+              <div class="wheel-area">
+                <button type="button" id="racing-wheel" class="racing-wheel" role="slider" aria-label="方向盘，左右方向键微调，Home 回正" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" aria-valuetext="居中" disabled><svg viewBox="0 0 200 200" fill="none" aria-hidden="true"><circle cx="100" cy="100" r="82" fill="#101720" stroke="#354758" stroke-width="17"/><path d="M100 18v12" stroke="#91ebba" stroke-width="5" stroke-linecap="round"/><path d="m24 76 56 18m96-18-56 18m-20 27v60" stroke="#354758" stroke-width="15"/><circle cx="100" cy="100" r="25" fill="#1b2a36" stroke="#4d6577" stroke-width="2"/><path d="m89 103 11-10 11 10" stroke="#91ebba" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="55" cy="82" r="4" fill="#91ebba"/><circle cx="145" cy="82" r="4" fill="#91ebba"/></svg></button>
+                <button type="button" id="wheel-reset" class="text-button" disabled>方向回正</button>
+              </div>
+              <div class="steering-setting"><div class="setting"><label for="racing-steering">转向 <output id="racing-steering-value">居中</output></label><input id="racing-steering" type="range" min="-100" max="100" value="0" disabled><div class="range-labels"><span>左</span><span>右</span></div></div><p class="control-note">拖动方向盘，松手回正。<br>滑杆可保持转向角度。</p></div>
+            </div>
+            <div class="shift-buttons"><button type="button" class="drive" data-control="X" data-input-mode="racing" disabled>− 降挡 <span>X</span></button><button type="button" class="drive" data-control="B" data-input-mode="racing" disabled>+ 升挡 <span>B</span></button></div>
+            <section class="pedal-section" aria-label="赛车模拟踏板力度">
+              <div class="pedal-caption"><span>踏板力度</span><span id="pedal-instructions">按住下拉 · 松开归零</span></div>
+              <div class="pedal-bank">
+                <div class="pedal pedal-clutch">
+                  <label for="pedal-clutch">离合 <small title="当前虚拟手柄以 LB 开关执行离合，非零即踩下">LB 开关</small></label>
+                  <div class="pedal-travel"><span class="pedal-rail" aria-hidden="true"></span><div class="pedal-motion" aria-hidden="true"><span class="pedal-face"></span></div><input id="pedal-clutch" data-pedal="clutch" type="range" min="0" max="100" step="1" value="0" aria-describedby="pedal-instructions" disabled></div>
+                  <div class="pedal-reading"><output id="pedal-clutch-value" for="pedal-clutch">0%</output><button type="button" class="pedal-reset" data-pedal-reset="clutch" aria-label="将手动离合踏板归零" title="将手动离合踏板归零" disabled>↺</button></div>
+                </div>
+                <div class="pedal pedal-brake">
+                  <label for="pedal-brake">刹车</label>
+                  <div class="pedal-travel"><span class="pedal-rail" aria-hidden="true"></span><div class="pedal-motion" aria-hidden="true"><span class="pedal-face"></span></div><input id="pedal-brake" data-pedal="brake" type="range" min="0" max="100" step="1" value="0" aria-describedby="pedal-instructions" disabled></div>
+                  <div class="pedal-reading"><output id="pedal-brake-value" for="pedal-brake">0%</output><button type="button" class="pedal-reset" data-pedal-reset="brake" aria-label="将手动刹车踏板归零" title="将手动刹车踏板归零" disabled>↺</button></div>
+                </div>
+                <div class="pedal pedal-throttle">
+                  <label for="pedal-throttle">油门</label>
+                  <div class="pedal-travel"><span class="pedal-rail" aria-hidden="true"></span><div class="pedal-motion" aria-hidden="true"><span class="pedal-face"></span></div><input id="pedal-throttle" data-pedal="throttle" type="range" min="0" max="100" step="1" value="0" aria-describedby="pedal-instructions" disabled></div>
+                  <div class="pedal-reading"><output id="pedal-throttle-value" for="pedal-throttle">0%</output><button type="button" class="pedal-reset" data-pedal-reset="throttle" aria-label="将手动油门踏板归零" title="将手动油门踏板归零" disabled>↺</button></div>
+                </div>
+              </div>
+            </section>
+          </section>
+          <div class="control-footer">
+            <details class="operation-help"><summary>操作说明</summary><div class="help-content">
+              <p>按住屏幕按钮或 Enter 操作，松开释放。Space 释放全部输入。</p>
+              <p>赛车模式提供三只踏板：按住并向下拖动增加力度，松开立即归零。方向键微调，End 踩满，松键归零；Home、↺ 可释放该踏板，Space 清空全部输入。触摸取消或失焦也会释放。</p>
+              <p>键盘使用 WASD / 方向键驾驶，C 离合，Q 降挡、E 升挡。展开“按键力度”可设置 W / S / C 的按住力度；普通键盘无法感知按压力。</p>
+              <p>方向盘松手回正，Home 也可回正。换挡对应 X / B。游戏需开启手动挡＋离合，并将 LB 绑定为离合；当前虚拟手柄的离合仅支持开关，0% 松开，非零踩下。</p>
+              <p>标准实体手柄：左摇杆转向，RT 油门、LT 刹车，LB 离合；扳机旁同步显示力度。连接后按任意键识别，浏览器需支持 Gamepad API，通常需通过 HTTPS 或 localhost 访问。</p>
+              <p>切换模式、终端或窗口失焦时自动释放；实体手柄需回中后恢复。手动驾驶与训练程序共享终端输入。</p>
+            </div></details>
+            <button type="button" class="release" id="release" disabled><span>■ 全部释放</span><kbd>SPACE</kbd></button>
           </div>
-          <label class="keyboard"><input type="checkbox" id="keyboard">启用键盘驾驶（WASD / 方向键）</label>
-          <button type="button" class="release" id="release" disabled>■ 全部释放 / SPACE</button>
         </div>
-        <div class="status-box"><strong>终端状态</strong><br><span id="hardware-status">等待终端连接</span></div>
       </aside>
     </div>
-    <div class="notice" id="notice" role="status" aria-live="polite">正在获取终端状态。终端上线后会自动显示画面。</div>
-    <footer>训练程序可通过中心 API 获取画面、发送动作并等待执行确认。手动驾驶与训练程序共享同一虚拟手柄，请安排好控制时段。</footer>
+    <div class="notice" id="notice" role="status" aria-live="polite" hidden>正在获取终端状态。终端上线后会自动显示画面。</div>
   </main>
 </body>
 </html>

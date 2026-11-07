@@ -28,6 +28,11 @@ class Xbox360Gamepad:
             import vgamepad
             self._module = vgamepad
             self._pad = vgamepad.VX360Gamepad()
+            # ViGEm 首次上电返回带偏移的初始化包，但内部缓存为全零，
+            # 因而首次中立报告会被去重。用未使用的右摇杆最小整数变化
+            # 强制刷新，再立即提交严格全零；1/32767 位于常规死区内。
+            self._pad.right_joystick(x_value=1, y_value=0)
+            self._pad.update()
             self.write(neutral_action())
         except Exception as exc:
             raise RuntimeError("cannot connect virtual Xbox 360 controller; install ViGEmBus and vgamepad") from exc

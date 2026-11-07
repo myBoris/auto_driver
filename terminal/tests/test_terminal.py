@@ -80,6 +80,62 @@ class ControllerTests(unittest.TestCase):
 
 
 class XboxMappingTests(unittest.TestCase):
+    def test_new_controller_clears_vigem_startup_packet_before_first_action(self):
+        class StartupPad:
+            """ViGEm compares new reports with zero while its initial USB packet is offset."""
+            neutral = {"buttons": 0, "left_trigger": 0, "right_trigger": 0,
+                       "left_x": 0, "left_y": 0, "right_x": 0, "right_y": 0}
+
+            def __init__(self):
+                self.report = dict(self.neutral)
+                self.cached = dict(self.neutral)
+                self.visible = {**self.neutral, "left_x": -3356, "left_y": -1869,
+                                "right_x": -3255, "right_y": -848}
+                self.reports = []
+                self.update()  # vgamepad submits its default zero report at construction.
+
+            def reset(self):
+                self.report = dict(self.neutral)
+
+            def right_joystick(self, x_value, y_value):
+                self.report.update(right_x=x_value, right_y=y_value)
+
+            def left_joystick_float(self, x_value_float, y_value_float):
+                self.report.update(left_x=round(x_value_float * 32767),
+                                   left_y=round(y_value_float * 32767))
+
+            def right_trigger_float(self, value_float):
+                self.report["right_trigger"] = round(value_float * 255)
+
+            def left_trigger_float(self, value_float):
+                self.report["left_trigger"] = round(value_float * 255)
+
+            def press_button(self, button):
+                self.report["buttons"] |= button
+
+            def update(self):
+                self.reports.append(dict(self.report))
+                if self.report != self.cached:
+                    self.cached = dict(self.report)
+                    self.visible = dict(self.report)
+
+        pad = StartupPad()
+        self.assertNotEqual(pad.visible, pad.neutral, "initial zero reports are deduplicated")
+        module = SimpleNamespace(VX360Gamepad=Mock(return_value=pad),
+                                 XUSB_BUTTON=SimpleNamespace(XUSB_GAMEPAD_B=0x2000,
+                                                            XUSB_GAMEPAD_LEFT_SHOULDER=0x0100))
+        with patch("terminal.control.backends.sys.platform", "win32"), patch.dict("sys.modules", {"vgamepad": module}):
+            backend = Xbox360Gamepad()
+        self.assertEqual(pad.visible, pad.neutral)
+        self.assertEqual(pad.reports, [pad.neutral, {**pad.neutral, "right_x": 1}, pad.neutral])
+
+        backend.write(normalize_action({"steering": -0.4, "throttle": 0.6, "brake": 0.2,
+                                        "buttons": ["B", "LB"]}))
+        self.assertEqual(pad.visible, {**pad.neutral, "left_x": -13107,
+                                      "right_trigger": 153, "left_trigger": 51, "buttons": 0x2100})
+        backend.write(normalize_action({"duration_ms": 0}))
+        self.assertEqual(pad.visible, pad.neutral)
+
     def backend(self):
         # Use the published XUSB masks, with no vgamepad import or device creation.
         constants = {

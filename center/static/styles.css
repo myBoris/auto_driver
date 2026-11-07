@@ -1,63 +1,308 @@
-/* 页面样式模块：负责响应式监看布局、视频容器与倒 T 驾驶按钮。 */
-:root { font-family: Inter, "Segoe UI", "Microsoft YaHei", sans-serif; color: #e9eef4; background: #0a0e13; font-synthesis: none; --line: #26313e; --muted: #98a7b9; --green: #91ebba; }
-    * { box-sizing: border-box; }
-    body { margin: 0; }
-    button, input, select { font: inherit; }
-    button, select { border: 1px solid var(--line); border-radius: 8px; color: inherit; background: #17202b; min-height: 42px; padding: 9px 12px; }
-    button { cursor: pointer; transition: background .12s, border-color .12s; }
-    button:hover:enabled { background: #263647; border-color: #557088; }
-    button:disabled, input:disabled { opacity: .45; cursor: default; }
-    button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #91ebba; outline-offset: 3px; }
-    header { border-bottom: 1px solid var(--line); padding: 23px max(24px, calc((100vw - 1440px) / 2)); display: flex; align-items: center; justify-content: space-between; gap: 20px; }
-    .brand { font-size: 20px; font-weight: 750; letter-spacing: 2px; }
-    .brand span { color: var(--green); }
-    .subtitle { color: var(--muted); margin-top: 6px; font-size: 12px; letter-spacing: 1px; }
-    .pill { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; border: 1px solid var(--line); border-radius: 30px; padding: 8px 12px; white-space: nowrap; }
-    .dot { width: 7px; height: 7px; background: #768291; border-radius: 50%; }
-    .online .dot { background: var(--green); box-shadow: 0 0 10px #91ebba44; }
-    main { max-width: 1488px; margin: auto; padding: 25px 24px 40px; }
-    .connection { display: grid; grid-template-columns: minmax(200px, 1fr) auto; align-items: end; gap: 12px; padding: 18px; border: 1px solid var(--line); background: #101720; border-radius: 12px; margin-bottom: 20px; }
-    label.field { display: grid; gap: 8px; color: var(--muted); font-size: 12px; }
-    .field select { width: 100%; color: #e9eef4; font-size: 14px; }
-    .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
-    .panel { border: 1px solid var(--line); border-radius: 12px; background: #101720; overflow: hidden; }
-    .panel-heading { padding: 17px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--line); gap: 10px; }
-    h1, h2 { font-size: 15px; margin: 0; font-weight: 600; }
-    .eyebrow { font-size: 10px; color: var(--muted); letter-spacing: 1.5px; margin-bottom: 5px; }
-    .video { background: #060a0f; aspect-ratio: 16 / 9; position: relative; display: flex; align-items: center; justify-content: center; }
-    .video video { width: 100%; height: 100%; object-fit: contain; position: absolute; inset: 0; }
-    .placeholder { text-align: center; padding: 24px; color: var(--muted); }
-    .placeholder svg { display: block; margin: 0 auto 17px; color: #486079; }
-    .placeholder strong { display: block; color: #c6d1dd; margin-bottom: 10px; font-size: 16px; }
-    .placeholder p { margin: 0; line-height: 1.7; font-size: 13px; }
-    .frame-note { padding: 12px 20px; color: var(--muted); display: flex; justify-content: space-between; font-size: 12px; gap: 12px; }
-    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border-top: 1px solid var(--line); }
-    .metric { padding: 18px 15px; background: #101720; min-width: 0; }
-    .metric .value { display: block; font-size: 19px; font-variant-numeric: tabular-nums; margin-bottom: 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .metric .label { color: var(--muted); font-size: 11px; }
-    .controls { padding: 18px; }
-    .control-hint { margin: 0 0 17px; font-size: 12px; color: var(--muted); line-height: 1.7; }
-    .drive-pad { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-areas: ". throttle ." "left brake right"; gap: 8px; }
-    .drive-pad button { min-height: 65px; touch-action: none; user-select: none; -webkit-user-select: none; padding: 8px 4px; }
-    .drive-pad [data-control='throttle'] { grid-area: throttle; }
-    .drive-pad [data-control='left'] { grid-area: left; }
-    .drive-pad [data-control='brake'] { grid-area: brake; }
-    .drive-pad [data-control='right'] { grid-area: right; }
-    .drive-pad button span { display: block; font-size: 10px; color: var(--muted); margin-top: 6px; }
-    button.held { border-color: var(--green); background: #224332; color: #bcfbd6; }
-    .setting { margin-top: 22px; }
-    .setting label { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
-    input[type=range] { width: 100%; margin: 12px 0 0; accent-color: var(--green); }
-    .buttons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin: 20px 0; }
-    .buttons button { min-height: 39px; font-size: 12px; touch-action: none; user-select: none; -webkit-user-select: none; padding: 6px; }
-    .keyboard { font-size: 12px; color: #b8c4d2; display: flex; gap: 9px; align-items: center; line-height: 1.5; }
-    .keyboard input { accent-color: var(--green); width: 16px; height: 16px; }
-    .release { width: 100%; margin-top: 20px; color: #ffb6b6; border-color: #734142; background: #301c23; font-weight: 650; }
-    .release:hover:enabled { background: #4b2630; border-color: #c87276; }
-    .status-box { border-top: 1px solid var(--line); padding: 15px 18px; font-size: 12px; color: var(--muted); line-height: 1.7; overflow-wrap: anywhere; }
-    .status-box strong { color: #cbd7e3; font-weight: 500; }
-    .notice { margin-top: 18px; min-height: 42px; padding: 12px 15px; font-size: 13px; border: 1px solid var(--line); background: #101720; border-radius: 8px; color: var(--muted); line-height: 1.6; }
-    .notice.error { color: #ffb6b6; border-color: #734142; background: #22151c; }
-    footer { margin-top: 20px; color: #6f8195; font-size: 11px; line-height: 1.8; }
-    @media (max-width: 1000px) { .workspace { grid-template-columns: minmax(0, 1fr) 280px; } .connection { grid-template-columns: minmax(150px, 1fr) auto; } }
-    @media (max-width: 740px) { header { padding: 20px 16px; } main { padding: 18px 16px 30px; } .workspace { grid-template-columns: 1fr; } .connection { padding: 14px; } .metric { padding: 14px 10px; } .metric .value { font-size: 16px; } .controls { padding: 18px 22px; } .drive-pad button { min-height: 58px; } .brand { font-size: 17px; } }
+/* 统一终端状态、视频和驾驶操作的层级、间距及响应式布局。 */
+:root {
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-synthesis: none;
+  color: #e4ebf2;
+  background: #0b1016;
+  --panel: #121a24;
+  --line: #283442;
+  --muted: #94a3b5;
+  --green: #91ebba;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; }
+button, input, select { font: inherit; }
+button, select { min-height: 38px; padding: 8px 12px; border: 1px solid #344251; border-radius: 7px; background: #1b2531; color: inherit; font-size: 13px; }
+button { cursor: pointer; transition: border-color .15s, background .15s; }
+button:hover:enabled { border-color: #60778d; background: #243343; }
+button:disabled, input:disabled, select:disabled { opacity: .48; cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+header { height: 60px; padding: 0 max(24px, calc((100vw - 1512px) / 2)); display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); background: #0e151d; }
+.brand { font-size: 18px; font-weight: 700; letter-spacing: 2px; white-space: nowrap; }
+.brand span { color: var(--green); }
+.subtitle { color: #c0ccda; font-size: 13px; }
+.subtitle span { margin-left: 20px; color: #7e91a5; font-size: 11px; letter-spacing: 1px; }
+main { max-width: 1560px; margin: auto; padding: 20px 24px; }
+.panel { min-width: 0; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); }
+.session-overview { display: grid; grid-template-columns: 280px minmax(0, 1fr) 164px; align-items: center; gap: 24px; padding: 16px 20px; margin-bottom: 20px; }
+.terminal-section { min-width: 0; }
+.terminal-caption { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; font-size: 12px; color: var(--muted); }
+.terminal-counts { display: inline-flex; gap: 5px; font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.terminal-counts strong { font-weight: 600; }
+.online-count { color: var(--green); }
+.count-divider { color: #536679; margin: 0 2px; }
+.terminal-picker { display: flex; align-items: center; gap: 8px; }
+.terminal-picker select { min-width: 0; width: 100%; height: 38px; }
+.icon-button { display: inline-flex; justify-content: center; align-items: center; width: 38px; height: 38px; flex-shrink: 0; padding: 8px; }
+.icon-button svg { display: block; }
+.metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: center; gap: 0; margin: 0; }
+.metric { min-width: 0; padding: 2px 16px; border-left: 1px solid var(--line); }
+.metric dt { color: var(--muted); font-size: 12px; margin-bottom: 9px; }
+.metric dd { margin: 0; color: #e9f0f6; font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#fps { color: var(--green); }
+#resolution { font-size: 15px; }
+.connection-summary { display: grid; gap: 7px; min-width: 0; padding-left: 20px; border-left: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.connection-state { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.dot { width: 6px; height: 6px; flex-shrink: 0; display: inline-block; border-radius: 50%; background: #6f8194; }
+.online .dot { background: var(--green); }
+.pill { width: fit-content; font-size: 12px; color: var(--muted); }
+.pill[data-state="playing"] { color: var(--green); }
+.pill[data-state="unavailable"] { color: #e8bf87; }
+.hardware-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #7e91a5; }
+.hardware-status.error { color: #f3a6aa; }
+.workspace { display: grid; grid-template-columns: minmax(0, 1fr) 392px; align-items: stretch; gap: 20px; }
+.panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 52px; flex-shrink: 0; padding: 0 18px; border-bottom: 1px solid var(--line); }
+h1, h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.heading-note { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.video-title { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.video-title h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-mark { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: #607488; }
+.playing .live-mark { background: var(--green); }
+.video-panel { display: flex; flex-direction: column; overflow: hidden; }
+.video { display: flex; flex: 1; align-items: center; justify-content: center; position: relative; min-height: 300px; aspect-ratio: 16 / 9; background: #080d13; }
+.video video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.placeholder { padding: 24px; text-align: center; color: var(--muted); }
+.placeholder svg { display: block; margin: 0 auto 20px; color: #50677e; }
+.placeholder strong { display: block; margin-bottom: 10px; color: #c9d5e2; font-size: 16px; font-weight: 500; }
+.placeholder p { max-width: 440px; margin: 0; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+.frame-note { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; min-height: 40px; padding: 10px 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.control-panel { display: flex; flex-direction: column; min-height: 584px; }
+.controls { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 16px; }
+.mode-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; padding: 3px; margin-bottom: 16px; border-radius: 8px; background: #0b121a; }
+.mode-tabs button { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 38px; padding: 6px 4px; border-color: transparent; background: transparent; font-size: 13px; white-space: nowrap; }
+.mode-tabs button svg { width: 17px; height: 17px; flex-shrink: 0; }
+.mode-tabs button[aria-selected="true"] { background: #243e33; border-color: #385b49; color: #b5f1cf; }
+.mode-tabs button:hover:enabled { background: #1b2531; border-color: transparent; }
+.mode-tabs button[aria-selected="true"]:hover:enabled { background: #294a3b; border-color: #456d57; }
+.mode-panel { flex: 1; min-width: 0; }
+#panel-racing { display: flex; flex-direction: column; }
+#panel-racing .pedal-section { margin-top: auto; }
+#panel-racing > .shift-buttons { margin-bottom: 8px; }
+.keyboard-intro { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 24px; font-size: 12px; color: var(--muted); }
+.keyboard { display: flex; align-items: center; gap: 8px; color: #d7e1eb; font-size: 13px; }
+.keyboard input { width: 15px; height: 15px; margin: 0; accent-color: var(--green); }
+.drive { touch-action: none; user-select: none; -webkit-user-select: none; }
+.drive-pad { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-areas: ". throttle ." "left brake right"; gap: 6px; }
+.keyboard-driving { display: grid; grid-template-columns: minmax(0, 1fr) 112px; align-items: stretch; gap: 12px; margin: 16px 0; }
+.keyboard-pad { min-width: 0; margin: 0; }
+.keyboard-aux { display: flex; flex-direction: column; gap: 6px; }
+.clutch-key { flex: 1; padding: 5px; }
+.clutch-key kbd { font-size: 16px; }
+.clutch-key span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
+.keyboard-aux .shift-buttons { gap: 6px; margin: 0; }
+.keyboard-aux .shift-buttons button { gap: 5px; min-height: 38px; padding: 4px 2px; font-size: 12px; }
+.drive-pad button { min-height: 60px; padding: 6px 4px; }
+.drive-pad [data-control="throttle"] { grid-area: throttle; }
+.drive-pad [data-control="left"] { grid-area: left; }
+.drive-pad [data-control="brake"] { grid-area: brake; }
+.drive-pad [data-control="right"] { grid-area: right; }
+kbd { font: 600 12px "Segoe UI", sans-serif; }
+.drive-pad kbd { display: block; font-size: 16px; line-height: 19px; }
+.drive-pad button span { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; }
+button.held { background: #294f3b; border-color: var(--green); color: #c6f9dc; }
+.setting { min-width: 0; }
+.setting label { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #bac7d6; font-size: 13px; }
+.setting output { color: #e0e9f2; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+input[type="range"] { display: block; width: 100%; height: 18px; margin: 12px 0 0; accent-color: var(--green); cursor: pointer; touch-action: pan-y; }
+.keyboard-settings { display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.keyboard-settings .setting { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: 20px; min-height: 26px; }
+.keyboard-settings input { margin: 0; }
+.key-strengths { position: relative; margin-top: 4px; }
+.key-strengths summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 24px; color: var(--muted); font-size: 12px; cursor: pointer; list-style: none; }
+.key-strengths summary span { margin-left: auto; }
+.key-strengths summary::after { content: "+"; font-size: 16px; }
+.key-strengths[open] summary::after { content: "−"; }
+.key-strengths .keyboard-settings { position: absolute; inset: 100% 0 auto; z-index: 4; padding: 12px; border: 1px solid #45576b; border-radius: 8px; background: #1b2835; box-shadow: 0 8px 20px #0006; }
+.shift-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.shift-buttons button { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 38px; font-size: 13px; }
+.shift-buttons kbd, .shift-buttons button span { color: var(--muted); font-size: 12px; }
+.device-info { position: relative; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0 0 8px; margin-bottom: 8px; border-bottom: 1px solid var(--line); }
+.gamepad-device { display: flex; align-items: center; gap: 7px; flex-shrink: 0; font-size: 12px; }
+.gamepad-device .dot { background: var(--green); }
+.device-name { max-width: 100%; min-width: 0; margin: 0; color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gamepad-triggers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.gamepad-triggers button { min-height: 48px; padding: 5px 3px; font-size: 13px; }
+.gamepad-triggers button span { display: block; margin-top: 1px; color: var(--muted); font-size: 12px; }
+.gamepad-triggers output { font-variant-numeric: tabular-nums; }
+.gamepad-main { display: flex; align-items: center; justify-content: space-around; gap: 20px; padding: 24px 0 12px; }
+.gamepad-note { padding-top: 12px; border-top: 1px solid var(--line); }
+.virtual-stick { width: 140px; text-align: center; }
+.mini-label { color: var(--muted); font-size: 12px; }
+.steer-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+.steer-buttons button { min-height: 46px; padding: 4px; font-size: 21px; border-radius: 20px 7px 7px 20px; }
+.steer-buttons button + button { border-radius: 7px 20px 20px 7px; }
+.face-buttons { display: grid; grid-template-columns: repeat(3, 36px); grid-template-areas: ". y ." "x . b" ". a ."; }
+.face-buttons button { width: 36px; height: 36px; min-height: 36px; padding: 0; border-radius: 50%; font-size: 13px; font-weight: 600; }
+.face-y { grid-area: y; color: #e9cb7d; }
+.face-x { grid-area: x; color: #83bcfb; }
+.face-b { grid-area: b; color: #f49d9f; }
+.face-a { grid-area: a; color: var(--green); }
+.extra-controls { margin-top: 0; }
+.extra-controls summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 24px; color: #c5d2df; font-size: 12px; cursor: pointer; }
+.extra-controls summary::after { content: "+"; color: var(--muted); font-size: 16px; }
+.extra-controls[open] summary::after { content: "−"; }
+.gamepad-extras { position: absolute; top: calc(100% - 2px); left: 0; right: 0; z-index: 4; padding: 12px; border: 1px solid #45576b; border-radius: 8px; background: #1b2835; box-shadow: 0 8px 20px #0006; }
+summary::-webkit-details-marker { display: none; }
+.gamepad-secondary { display: flex; justify-content: space-around; align-items: center; gap: 20px; padding: 8px 0 12px; }
+.dpad { display: grid; grid-template-columns: repeat(3, 30px); grid-template-areas: ". up ." "left down right"; gap: 3px; }
+.dpad button { width: 30px; min-height: 30px; padding: 0; border-radius: 5px; font-size: 15px; }
+.dpad-up { grid-area: up; }
+.dpad-left { grid-area: left; }
+.dpad-down { grid-area: down; }
+.dpad-right { grid-area: right; }
+.thumb-buttons { display: flex; gap: 8px; }
+.thumb-buttons button { width: 38px; padding: 4px; border-radius: 50%; font-size: 12px; }
+.system-buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.system-buttons button { min-height: 32px; padding: 4px; font-size: 12px; }
+.wheel-control { display: grid; grid-template-columns: 140px minmax(0, 1fr); align-items: center; gap: 20px; }
+.wheel-area { display: flex; flex-direction: column; align-items: center; }
+.racing-wheel { width: 128px; height: 128px; min-height: 0; padding: 0; border: 0; border-radius: 50%; background: transparent; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
+.racing-wheel:hover:enabled { background: #192733; }
+.racing-wheel:active:enabled { cursor: grabbing; }
+.racing-wheel svg { display: block; width: 100%; height: 100%; transform: rotate(var(--wheel-angle, 0deg)); pointer-events: none; }
+.text-button { min-height: 26px; margin-top: 4px; padding: 3px 8px; border-color: transparent; background: transparent; color: var(--muted); font-size: 12px; }
+.range-labels { display: flex; justify-content: space-between; margin-top: 2px; color: var(--muted); font-size: 12px; }
+.control-note { margin: 14px 0 0; color: var(--muted); font-size: 12px; line-height: 1.8; }
+.pedal-section { flex-shrink: 0; padding-top: 8px; margin-top: 8px; border-top: 1px solid var(--line); }
+.pedal-caption { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; color: #c3cfdd; font-size: 12px; }
+.pedal-caption span + span { color: var(--muted); font-size: 11px; }
+.pedal-bank { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.pedal { --pedal-level: 0%; --pedal-color: #94b9ed; --pedal-face-width: 46px; --pedal-face-height: 32px; position: relative; min-width: 0; padding: 5px 6px 2px; border: 1px solid var(--line); border-radius: 8px; background: #0d151e; }
+.pedal-brake { --pedal-color: #edb39a; }
+.pedal-throttle { --pedal-color: #91ebba; --pedal-face-width: 30px; --pedal-face-height: 44px; }
+.pedal label { display: flex; align-items: center; justify-content: center; gap: 4px; min-height: 16px; color: #ccd8e5; font-size: 12px; }
+.pedal label small { color: var(--muted); font-size: 10px; }
+.pedal-travel { position: relative; height: 82px; margin: 4px 0; border-radius: 5px; }
+.pedal-rail { position: absolute; top: calc(var(--pedal-face-height) / 2); bottom: calc(var(--pedal-face-height) / 2); left: calc(50% - 4px); width: 8px; border: 1px solid #37495b; border-radius: 6px; background: linear-gradient(to bottom, var(--pedal-color) 0%, var(--pedal-color) var(--pedal-level), #23303e var(--pedal-level), #23303e 100%); }
+.pedal-motion { position: absolute; inset: 0 0 var(--pedal-face-height); pointer-events: none; }
+.pedal-face { position: absolute; top: var(--pedal-level); left: 50%; width: var(--pedal-face-width); height: var(--pedal-face-height); transform: translateX(-50%); border: 2px solid #8193a6; border-radius: 6px; background: repeating-linear-gradient(to bottom, #526477 0 4px, #243343 4px 7px); box-shadow: inset 0 2px 0 #b2c1d333, 0 3px 6px #0008; }
+.pedal.pressed .pedal-face { border-color: var(--pedal-color); box-shadow: inset 0 2px 0 #c7d4e133, 0 0 10px #0008; }
+.pedal-travel input[type="range"] { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; margin: 0; padding: 0; appearance: none; -webkit-appearance: none; writing-mode: vertical-lr; direction: ltr; background: transparent; opacity: 0; cursor: ns-resize; touch-action: none; }
+.pedal-travel input::-webkit-slider-runnable-track { width: 8px; height: 100%; background: transparent; }
+.pedal-travel input::-webkit-slider-thumb { width: var(--pedal-face-width); height: var(--pedal-face-height); appearance: none; -webkit-appearance: none; }
+.pedal-travel input::-moz-range-track { width: 8px; height: 100%; background: transparent; }
+.pedal-travel input::-moz-range-thumb { width: var(--pedal-face-width); height: var(--pedal-face-height); border: 0; }
+.pedal-travel:focus-within { outline: 2px solid var(--pedal-color); outline-offset: 1px; }
+.pedal:has(input:disabled) { opacity: .48; }
+.pedal-reading { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 22px; padding-left: 24px; }
+.pedal-reading output { min-width: 32px; color: #b4c3d3; font-size: 13px; text-align: center; font-variant-numeric: tabular-nums; }
+.pedal.pressed output { color: var(--pedal-color); }
+.pedal-reset { width: 20px; height: 20px; min-height: 20px; padding: 0; border-color: transparent; background: transparent; color: var(--muted); font-size: 16px; line-height: 1; }
+.control-footer { position: relative; display: grid; grid-template-columns: 78px minmax(0, 1fr); align-items: center; gap: 16px; padding-top: 12px; margin-top: auto; }
+.operation-help summary { width: fit-content; padding: 8px 0; color: var(--muted); font-size: 12px; cursor: pointer; list-style: none; }
+.operation-help summary:hover { color: #e4ebf2; }
+.operation-help summary::after { content: " ⓘ"; }
+.help-content { position: absolute; left: 0; bottom: calc(100% - 4px); z-index: 5; width: 100%; max-height: 420px; overflow-y: auto; padding: 14px 16px; border: 1px solid #45576b; border-radius: 9px; background: #1b2835; box-shadow: 0 10px 30px #0007; color: #c4d1df; font-size: 12px; line-height: 1.8; }
+.help-content p { margin: 0 0 10px; }
+.help-content p:last-child { margin-bottom: 0; }
+.release { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 40px; padding: 8px 12px; border-color: #75464d; background: #342129; color: #f4b1b4; font-size: 13px; font-weight: 600; }
+.release kbd { padding: 2px 4px; border: 1px solid #75464d; border-radius: 4px; color: #deb1b4; font-size: 10px; font-weight: 400; }
+.release:hover:enabled { border-color: #c9858b; background: #4a2b35; }
+.notice { margin-top: 16px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.notice.error { border-color: #75464d; background: #2a1a22; color: #f4b1b4; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+@media (max-width: 1250px) {
+  .session-overview { grid-template-columns: 246px minmax(0, 1fr) 140px; gap: 16px; padding: 16px; }
+  .metric { padding: 2px 12px; }
+  .metric dd { font-size: 15px; }
+  #resolution { font-size: 14px; }
+  .connection-summary { padding-left: 16px; }
+  .workspace { grid-template-columns: minmax(0, 1fr) 376px; gap: 16px; }
+}
+@media (max-width: 1050px) {
+  .session-overview { grid-template-columns: 240px minmax(0, 1fr); }
+  .connection-summary { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 10px 20px; padding: 12px 0 0; border-left: 0; border-top: 1px solid var(--line); }
+  .hardware-status { margin-left: auto; }
+  .workspace { grid-template-columns: minmax(0, 1fr) 360px; }
+  .wheel-control { grid-template-columns: 128px minmax(0, 1fr); gap: 14px; }
+  .racing-wheel { width: 120px; height: 120px; }
+}
+@media (min-width: 901px) and (max-width: 1050px) {
+  .session-overview { margin-bottom: 16px; }
+  .control-panel { min-height: 536px; }
+  .controls { padding: 12px; }
+  .panel-heading { height: 48px; }
+  .mode-tabs { margin-bottom: 12px; }
+  .wheel-control { grid-template-columns: 116px minmax(0, 1fr); }
+  .racing-wheel { width: 108px; height: 108px; }
+  .pedal-travel { height: 70px; }
+  .pedal-section { padding-top: 6px; margin-top: 6px; }
+  .keyboard-intro { min-height: 22px; }
+  .keyboard-driving { margin: 12px 0; }
+  .drive-pad button { min-height: 54px; padding: 5px 2px; }
+  .drive-pad kbd { font-size: 14px; line-height: 16px; }
+  .drive-pad button span { font-size: 11px; }
+  .keyboard-aux .shift-buttons button { min-height: 32px; }
+}
+@media (max-width: 900px) {
+  .workspace { grid-template-columns: 1fr; }
+  .video { flex: none; min-height: 0; }
+  .control-panel { min-height: 548px; }
+  .controls { width: 100%; max-width: 480px; margin: auto; padding: 18px; }
+  .control-panel .panel-heading { padding: 0 18px; }
+  .wheel-control { grid-template-columns: 140px minmax(0, 1fr); gap: 24px; }
+  .racing-wheel { width: 128px; height: 128px; }
+}
+@media (max-width: 650px) {
+  header { height: 56px; padding: 0 16px; gap: 12px; }
+  .brand { font-size: 16px; }
+  .subtitle { font-size: 12px; }
+  .subtitle span { display: none; }
+  main { padding: 16px; }
+  .session-overview { grid-template-columns: 1fr; gap: 16px; padding: 16px; margin-bottom: 16px; }
+  .terminal-caption { margin-bottom: 8px; }
+  .metrics { gap: 16px 0; padding-top: 14px; border-top: 1px solid var(--line); }
+  .metric { padding: 0 12px; }
+  .metric:first-child { border-left: 0; padding-left: 0; }
+  .metric dt { margin-bottom: 6px; font-size: 12px; }
+  .metric dd { font-size: 14px; }
+  #resolution { font-size: 12px; }
+  .connection-summary { grid-column: auto; gap: 8px 16px; }
+  .hardware-status { margin-left: 0; }
+  .panel-heading { height: 48px; padding: 0 16px; }
+  .placeholder { padding: 20px; }
+  .placeholder svg { width: 40px; height: 34px; margin-bottom: 14px; }
+  .placeholder strong { font-size: 14px; }
+  .placeholder p { font-size: 12px; }
+  .frame-note { min-height: 36px; padding: 9px 12px; font-size: 11px; }
+  .controls { padding: 16px; }
+  .control-panel { min-height: 548px; }
+  .control-footer { gap: 12px; }
+}
+@media (max-width: 430px) {
+  .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metric { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 0 0 14px; }
+  .metric:nth-child(odd) { border-left: 0; padding: 0 14px 0 0; }
+  .metric dt { margin: 0; }
+  .metric dd, #resolution { font-size: 13px; }
+  .wheel-control { grid-template-columns: 128px minmax(0, 1fr); gap: 14px; }
+  .racing-wheel { width: 124px; height: 124px; }
+  .steering-setting .control-note { font-size: 12px; }
+  .mode-tabs button { gap: 5px; font-size: 12px; }
+  .keyboard-driving { grid-template-columns: minmax(0, 1fr) 100px; gap: 8px; }
+  .keyboard-aux .shift-buttons button { gap: 3px; font-size: 11px; }
+  .keyboard-settings .setting { grid-template-columns: 96px minmax(0, 1fr); gap: 16px; }
+  .device-info { flex-wrap: wrap; gap: 4px; }
+  .device-name { max-width: 100%; }
+  .gamepad-main { gap: 12px; }
+  .virtual-stick { width: 120px; }
+}
+@media (max-width: 350px) {
+  header { padding: 0 12px; }
+  .subtitle { font-size: 11px; }
+  main { padding: 12px; }
+  .session-overview { padding: 14px; }
+  .controls { padding: 14px; }
+  .wheel-control { grid-template-columns: 116px minmax(0, 1fr); gap: 12px; }
+  .racing-wheel { width: 112px; height: 112px; }
+  .keyboard-driving { grid-template-columns: minmax(0, 1fr) 88px; gap: 6px; }
+  .drive-pad button span { font-size: 11px; }
+  .pedal-bank { gap: 7px; }
+  .pedal { padding-right: 4px; padding-left: 4px; }
+  .pedal-reading { gap: 4px; padding-left: 10px; }
+  .control-footer { grid-template-columns: 72px minmax(0, 1fr); gap: 10px; }
+  .release { gap: 6px; padding: 8px; font-size: 12px; }
+  .mode-tabs button { gap: 4px; padding: 6px 2px; }
+  .mode-tabs button svg { width: 15px; height: 15px; }
+}
