@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "steps": [
+    {"buttons": ["Y"], "duration_ms": 200},
+    {"wait_seconds": 2.0},
+    {"buttons": ["A"], "duration_ms": 200},
+    {"wait_seconds": 0.5}
+  ]
+}

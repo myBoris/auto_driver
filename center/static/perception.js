@@ -176,7 +176,10 @@
     renderCurrent() {
       if (!this.usable()) return;
       if (this.demo) { this.render(this.demoResult(), true, true); return; }
-      if (this.result && performance.now() < this.expiresAt) { this.render(this.result, this.result.prediction?.source === 'demo'); return; }
+      if (this.result && performance.now() < this.expiresAt) {
+        const demo = this.result.prediction?.source === 'demo' || (typeof this.result.model?.id === 'string' && this.result.model.id.startsWith('demo-'));
+        this.render(this.result, demo); return;
+      }
       if (this.result) { this.clearResult(); this.showStatus('stale', statuses.stale); return; }
       this.showStatus(this.status?.state || 'waiting', this.status?.message || (this.active ? statuses.waiting : '视频连接后显示 AI 结果'));
     }
@@ -220,8 +223,9 @@
       const confidence = body.road?.confidence ?? body.prediction?.confidence;
       const metrics = demo ? localDemo ? '固定道路样例 · 每 3 秒切换方向' : '示意数据 · 等待模型接入' : [`${body.road ? '道路' : '预测'}置信 ${Math.round(confidence * 100)}%`, body.inference_ms == null ? '' : `推理 ${Math.round(body.inference_ms)} ms`].filter(Boolean).join(' · ');
       this.text('perception-metrics', metrics); this.hide('perception-metrics', false);
-      this.hide('perception-source', !directionOn);
-      if (directionOn) this.text('perception-source', demo ? '演示数据，不代表实时检测结果' : body.prediction.source === 'road_geometry' ? '根据道路走势推算' : body.prediction.source === 'external' ? '外部上传的预测结果' : '模型上传的预测结果');
+      this.hide('perception-source', !directionOn && !(demo && roadOn));
+      if (demo && (roadOn || directionOn)) this.text('perception-source', '演示数据，不代表实时检测结果');
+      else if (directionOn) this.text('perception-source', body.prediction.source === 'road_geometry' ? '根据道路走势推算' : body.prediction.source === 'external' ? '外部上传的预测结果' : '模型上传的预测结果');
       if (hud) hud.title = typeof body.model?.label === 'string' ? body.model.label.slice(0, 160) : '';
     }
 

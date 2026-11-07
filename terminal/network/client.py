@@ -18,6 +18,7 @@ import aiohttp
 from ..capture import LatestCapture
 from ..control import Controller
 from .discovery import discover_center
+from .telemetry import FH5Telemetry
 from ..config.connection import TerminalConfig
 
 LOG = logging.getLogger(__name__)
@@ -30,10 +31,21 @@ class TerminalClient:
         self.capture = capture
         self.controller = controller
         self.stop_event = asyncio.Event()
+        self.telemetry = FH5Telemetry(enabled=config.telemetry_enabled,
+                                      host=config.telemetry_host, port=config.telemetry_port)
 
     def status(self) -> dict[str, Any]:
         return {"capture": self.capture.status(), "control": self.controller.status(),
-                "video": self.capture.video_status(), "mock": self.config.mock}
+                "video": self.capture.video_status(), "mock": self.config.mock,
+                "telemetry": self.telemetry.status()}
+
+    async def _telemetry(self, ws: aiohttp.ClientWebSocketResponse) -> None:
+        # 连接建立前的 UDP 不重放到新会话；最多 30Hz，阻塞时始终只取最新包。
+        previous = self.telemetry.sequence
+        while True:
+            previous, sample = await self.telemetry.next_sample(previous)
+            await ws.send_json({"type": "telemetry", **sample})
+            await asyncio.sleep(1 / 30)
 
     async def _watch_stop_file(self) -> None:
         while not self.stop_event.is_set():
@@ -115,7 +127,8 @@ class TerminalClient:
         async with session.ws_connect(f"{center}/ws/terminal", headers=headers,
                                       heartbeat=10, max_msg_size=64 * 1024) as ws:
             await ws.send_json({"type": "hello", "protocol": 1, "terminal_id": self.config.terminal_id,
-                                "name": self.config.name, "capabilities": ["capture", "gamepad"],
+                                "name": self.config.name, "capabilities": ["capture", "gamepad"] +
+                                (["fh5_telemetry"] if self.config.telemetry_enabled else []),
                                 "capture": self.capture.status(), "status": self.status()})
             message = await ws.receive(timeout=10)
             if message.type != aiohttp.WSMsgType.TEXT:
@@ -132,7 +145,8 @@ class TerminalClient:
                 interval = 5
             LOG.info("Connected to %s as %s (session %s)", center, self.config.terminal_id, welcome.get("session_id"))
             tasks = [asyncio.create_task(self._frames(ws)), asyncio.create_task(self._heartbeat(ws, interval)),
-                     asyncio.create_task(self._commands(ws)), asyncio.create_task(self.stop_event.wait())]
+                     asyncio.create_task(self._commands(ws)), asyncio.create_task(self.stop_event.wait()),
+                     asyncio.create_task(self._telemetry(ws))]
             try:
                 done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                 for task in done:
@@ -148,6 +162,7 @@ class TerminalClient:
         self.capture.start()
         watcher = asyncio.create_task(self._watch_stop_file())
         try:
+            await self.telemetry.start()
             timeout = aiohttp.ClientTimeout(total=None, connect=5, sock_connect=5)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 failures = 0
@@ -168,6 +183,7 @@ class TerminalClient:
                         except TimeoutError:
                             pass
         finally:
+            self.telemetry.close()
             self.capture.configure_video({"enabled": False})
             watcher.cancel()
             await asyncio.gather(watcher, return_exceptions=True)

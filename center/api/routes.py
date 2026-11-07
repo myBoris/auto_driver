@@ -13,6 +13,7 @@ def register_routes(app):
         web.get("/api/terminals", terminals.terminals),
         web.get("/api/terminals/{terminal_id}", terminals.terminal),
         web.get("/api/terminals/{terminal_id}/control", terminals.control),
+        web.get("/api/terminals/{terminal_id}/telemetry", terminals.telemetry),
         web.get("/api/terminals/{terminal_id}/frame", terminals.frame),
         web.get("/api/terminals/{terminal_id}/stream", terminals.stream),
         web.get("/api/terminals/{terminal_id}/perception", perception.perception),

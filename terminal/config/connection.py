@@ -13,3 +13,6 @@ class TerminalConfig:
     discovery_address: str = "255.255.255.255"
     stop_file: Path | None = None
     mock: bool = False
+    telemetry_enabled: bool = True
+    telemetry_host: str = "127.0.0.1"
+    telemetry_port: int = 5300

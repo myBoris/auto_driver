@@ -1231,6 +1231,17 @@ test('perception renders uploaded geometry and prediction using GET without driv
   h.dispose();
 });
 
+test('synthetic lane-only model results retain a visible demo label without a direction prediction', async () => {
+  const h = await perceptionPage(() => ok(perceptionResult({ prediction: null, model: { id: 'demo-driving-synthetic', label: '合成样本训练验证' } })));
+  assert.equal(h.get('perception-road').hidden, false);
+  assert.equal(h.get('perception-direction-line').hidden, true);
+  assert.equal(h.get('perception-demo-badge').hidden, false);
+  assert.equal(h.get('perception-hud').dataset.state, 'demo');
+  assert.equal(h.get('perception-source').hidden, false);
+  assert.match(h.get('perception-source').textContent, /演示数据/);
+  assert.equal(h.actions().length, 0); assert.equal(h.releases().length, 0); h.dispose();
+});
+
 test('prediction arrow follows predicted steering independently of the road centerline', async () => {
   const h = await perceptionPage();
   const arrow = h.get('perception-direction-line').getAttribute('points').split(' ').map(p => p.split(',').map(Number));

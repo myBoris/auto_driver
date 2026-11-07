@@ -15,6 +15,7 @@ from ..domain.errors import APIError
 from ..domain.models import Frame
 from ..domain.protocol import normalize_action
 from .control_state import ControlState, neutral_state
+from .telemetry_state import TelemetryState
 
 @dataclass
 class TerminalSession:
@@ -36,6 +37,7 @@ class TerminalSession:
     pending: dict = field(default_factory=dict)
     pending_actions: dict = field(default_factory=dict)
     control: ControlState = field(default_factory=ControlState)
+    telemetry: TelemetryState = field(default_factory=TelemetryState)
     condition: asyncio.Condition = field(default_factory=asyncio.Condition)
     operation_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
@@ -46,6 +48,7 @@ class TerminalSession:
             "connected_at": self.connected_at, "last_seen": self.last_seen,
             "frame_sequence": self.sequence,
             "frame_timestamp": self.frame.captured_at if self.frame else None,
+            "frame_age_ms": max(0.0, time.time() - self.frame.received_at) * 1000 if self.frame else None,
             "width": self.capture.get("width"), "height": self.capture.get("height"),
             "capture": self.capture, "status": self.status, "capabilities": self.capabilities,
         }
@@ -61,6 +64,7 @@ class TerminalSession:
         async with self.condition:
             self.connected = False
             self.frame = None
+            self.telemetry.disconnect()
             if self.control.status != "disconnected":
                 self.control.update("disconnected")
             self.condition.notify_all()
@@ -86,6 +90,12 @@ class TerminalSession:
     async def get_control(self, *, after=None, timeout=0, session_id=None):
         value = await self.control.read(after=after, timeout=timeout,
                                         same_session=session_id in {None, self.session_id})
+        return {"terminal_id": self.terminal_id, "session_id": self.session_id,
+                "connected": self.connected, **value}
+
+    async def get_telemetry(self, *, after=None, timeout=0, session_id=None):
+        value = await self.telemetry.read(after=after, timeout=timeout,
+                                          same_session=session_id in {None, self.session_id})
         return {"terminal_id": self.terminal_id, "session_id": self.session_id,
                 "connected": self.connected, **value}
 

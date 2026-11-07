@@ -160,6 +160,8 @@ uv run --env-file .env --extra examples python -m center.examples.train_client -
 
 训练程序与监看页面共享同一个终端手柄，应安排好控制时段。释放会取消此前尚未结束的操作；释放后新提交的动作仍会正常执行。
 
+FH5 的 Data Out 可由新版终端通过现有连接转发到 `GET /api/terminals/{id}/telemetry`，供 AI 计算 RL 奖励。数据按连接隔离，1 秒过期；驾驶 POST 可携带期望 `session_id` 防止重连后操作新会话。配置、字段和时钟约定见 [遥测接口说明](docs/telemetry.md)，自动操作与 PPO 训练见 [AI RL 使用说明](../AI/docs/rl-training.md)。
+
 ## 终端协议与测试
 
 终端通过带 Bearer 认证的 `/ws/terminal` 注册，`hello.protocol=1`，随后中心发送 `welcome`，其中 `video` 包含硬件视频发布配置。AI 观察消息仍为二进制：`ADF1` + 网络字节序 float64 UNIX 采集时间 + JPEG，最大 8 MiB。终端每 5 秒发送 heartbeat，报告采集、手柄和视频状态；中心下发带唯一 ID 与过期时间的 action，终端执行后 ack。中心不会重放未确认的旧动作。

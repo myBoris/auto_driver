@@ -1,6 +1,7 @@
-"""集中保存图片 Transformer 的配置；参数校验留待实现。"""
+"""集中保存图片 Transformer 配置，并在创建网络之前校验张量约定。"""
 
 from dataclasses import dataclass
+import math
 from typing import Literal
 
 
@@ -19,4 +20,17 @@ class TransformerConfig:
     max_images: int = 10  # 图片位置编码支持的最大图片数；预处理函数当前也限制为 10 张。
     pooling: Literal["mean", "none"] = "mean"  # mean 返回组特征；none 返回逐张图片特征。
 
-    # TODO: 按需要添加配置校验，例如尺寸整除、维度整除和 dropout 范围。
+    def __post_init__(self) -> None:
+        for name in ("image_size", "patch_size", "in_channels", "embed_dim", "num_heads", "depth", "mlp_dim", "max_images"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+        if self.image_size % self.patch_size:
+            raise ValueError("image_size must be divisible by patch_size")
+        if self.embed_dim % self.num_heads:
+            raise ValueError("embed_dim must be divisible by num_heads")
+        if (isinstance(self.dropout, bool) or not isinstance(self.dropout, (int, float))
+                or not 0 <= self.dropout < 1 or not math.isfinite(self.dropout)):
+            raise ValueError("dropout must be finite and in [0, 1)")
+        if self.pooling not in ("mean", "none"):
+            raise ValueError("pooling must be mean or none")

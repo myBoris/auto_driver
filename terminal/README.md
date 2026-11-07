@@ -42,6 +42,22 @@ FFmpeg 由 uv 依赖 `imageio-ffmpeg` 随环境安装，无需手动下载或配
 
 不需要视频或无可用硬件时，显式设置 `TERMINAL_VIDEO_ENABLED=false` 或使用 `--no-video`，保留 JPEG 观察与控制 API。中心需部署 MediaMTX，并开放 RTSP TCP 8554、HTTP 8000 和配置的 WebRTC ICE 端口；媒体公网地址及 Docker UDP 映射由中心配置。
 
+## FH5 Data Out 遥测
+
+终端默认被动监听 `127.0.0.1:5300/UDP`。在 FH5 的设置 → HUD 和游戏性中启用 **Data Out / 数据输出**，目标 IP 填 `127.0.0.1`，目标端口填 `5300`，并返回自由驾驶或练习场景。Windows 上的商店版游戏若禁止回环发送，还需按游戏版本配置系统的应用回环网络豁免。游戏未开启输出时，终端只等待，不生成模拟遥测。
+
+```dotenv
+TERMINAL_TELEMETRY_ENABLED=true
+TERMINAL_TELEMETRY_HOST=127.0.0.1
+TERMINAL_TELEMETRY_PORT=5300
+```
+
+也可以传 `--telemetry-host`、`--telemetry-port`，或用 `--no-telemetry` 关闭监听。端口被占用会在 `status.telemetry.error` 和日志中显示，截图和控制仍可使用。修改后重启终端。
+
+只接受 FH5 的 324 字节 Dash 包，经现有认证 WebSocket 发送最新样本（最多 30Hz），无需在 Docker 上开放额外 UDP 端口。Center 提供认证读取接口 `GET /api/terminals/{id}/telemetry?after=0&timeout=1&session_id=当前会话`。响应含 `sequence`、`status`、`captured_at`、`received_at`、由 Center 计算的 `age_ms`、`ttl_ms=1000` 和 `data`；只有 `status=ready` 才有数据。序号必须大于 `after`，超时、过期或断开时 `data=null`，重连不沿用旧数据。
+
+遥测含游戏真实速度（m/s）、位置、局部速度和加速度、姿态、踏板力度与档位。`position` 是世界坐标；`velocity` / `acceleration` 顺序为局部 X右 / Y上 / Z前；`yaw` 等角度为弧度。踏板范围 `[0,1]`，转向范围 `[-1,1]`。该协议不提供碰撞、车道偏移或训练奖励，程序不会伪造这些数值。`captured_at` 是终端收到游戏 UDP 的时间，`received_at` 属于 Center 的时钟，两者不要直接相减判断延迟。
+
 ## 采集与控制约束
 
 建议游戏使用窗口化或无边框模式。`--window-title` 是忽略大小写的标题子串，优先精确标题，默认排除 Steam 的 `[Streaming]` 启动窗口。终端不切换游戏焦点；游戏失焦是否暂停及接受手柄输入取决于游戏设置。最小化、锁屏或非交互会话可能停止游戏渲染，需要持续画面时保持用户登录且窗口继续渲染。

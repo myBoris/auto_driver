@@ -2,5 +2,7 @@
 
 from .bc import BehaviorCloningConfig, BehaviorCloningTrainer
 from .rl import ReinforcementLearningConfig, ReinforcementLearningTrainer
+from .online import OnlineTrainer, OnlineTrainingConfig
 
-__all__ = ["BehaviorCloningConfig", "BehaviorCloningTrainer", "ReinforcementLearningConfig", "ReinforcementLearningTrainer"]
+__all__ = ["BehaviorCloningConfig", "BehaviorCloningTrainer", "ReinforcementLearningConfig", "ReinforcementLearningTrainer",
+           "OnlineTrainingConfig", "OnlineTrainer"]

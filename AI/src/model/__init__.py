@@ -1,4 +1,4 @@
-"""图片 Transformer 空框架的公共接口；各模块的具体计算待实现。"""
+"""图片 Transformer 特征提取与车道、方向、驾驶操作多任务模型。"""
 
 from .attention import MultiHeadSelfAttention
 from .config import TransformerConfig
@@ -7,6 +7,7 @@ from .feed_forward import FeedForward
 from .model import ImageTransformer
 from .patch_embedding import PatchEmbedding
 from .position_encoding import PositionEncoding
+from .driving import DrivingModel, DrivingModelConfig
 
 __all__ = [
     "TransformerConfig",
@@ -17,4 +18,6 @@ __all__ = [
     "TransformerEncoderLayer",
     "TransformerEncoder",
     "ImageTransformer",
+    "DrivingModelConfig",
+    "DrivingModel",
 ]

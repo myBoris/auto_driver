@@ -36,6 +36,19 @@ async def control(request):
     return web.json_response(value, headers={"Cache-Control": "no-store"})
 
 
+async def telemetry(request):
+    after = None
+    if "after" in request.query:
+        after = int(request.query["after"])
+        if after < 0:
+            raise APIError(400, "after must be nonnegative")
+    timeout = number(float(request.query.get("timeout", "0")), "timeout", 0, 20)
+    value = await session_for(request).get_telemetry(
+        after=after, timeout=timeout, session_id=request.query.get("session_id"),
+    )
+    return web.json_response(value, headers={"Cache-Control": "no-store"})
+
+
 async def frame(request):
     after = None
     if "after" in request.query:
@@ -92,15 +105,18 @@ async def stream(request):
 
 
 async def actions(request):
-    result = await request.app[TERMINALS].action(request.match_info["terminal_id"], await read_object(request))
+    result = await request.app[TERMINALS].action(request.match_info["terminal_id"], await read_object(request),
+                                               session_id=request.query.get("session_id"))
     return web.json_response(result)
 
 
 async def release(request):
-    result = await request.app[TERMINALS].release(request.match_info["terminal_id"])
+    result = await request.app[TERMINALS].release(request.match_info["terminal_id"],
+                                                session_id=request.query.get("session_id"))
     return web.json_response(result)
 
 
 async def step(request):
-    result = await request.app[TERMINALS].step(request.match_info["terminal_id"], await read_object(request))
+    result = await request.app[TERMINALS].step(request.match_info["terminal_id"], await read_object(request),
+                                             session_id=request.query.get("session_id"))
     return web.json_response(result)

@@ -5,6 +5,7 @@ CLI 优先于环境，已有进程环境优先于 .env，便于同一终端临�
 """
 
 import argparse
+import ipaddress
 import os
 from pathlib import Path
 import re
@@ -37,6 +38,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--jpeg-quality", type=int, default=75)
     parser.add_argument("--discovery-port", type=int, default=9999)
     parser.add_argument("--discovery-address", default="255.255.255.255")
+    parser.add_argument("--no-telemetry", action="store_false", dest="telemetry_enabled",
+                        default=os.environ.get("TERMINAL_TELEMETRY_ENABLED", "true").lower() not in {"0", "false", "no", "off"},
+                        help="disable passive FH5 Data Out UDP listener")
+    parser.add_argument("--telemetry-host", default=os.environ.get("TERMINAL_TELEMETRY_HOST", "127.0.0.1"),
+                        help="local IPv4 address for FH5 Data Out UDP")
+    parser.add_argument("--telemetry-port", type=int, default=os.environ.get("TERMINAL_TELEMETRY_PORT", "5300"))
     parser.add_argument("--mock", action="store_true", help="synthetic video and gamepad; no game input")
     parser.add_argument("--log-file", type=Path)
     parser.add_argument("--stop-file", type=Path, help="exit gracefully when this file appears")
@@ -65,6 +72,12 @@ def parse_args(argv=None):
         parser.error("video-encoder must be auto or a supported hardware H.264 encoder")
     if not 1 <= args.discovery_port <= 65535:
         parser.error("discovery-port must be 1..65535")
+    if not 1 <= args.telemetry_port <= 65535:
+        parser.error("telemetry-port must be 1..65535")
+    try:
+        ipaddress.IPv4Address(args.telemetry_host)
+    except ValueError:
+        parser.error("telemetry-host must be a local IPv4 address")
     if args.center:
         try:
             args.center = validate_center_url(args.center)

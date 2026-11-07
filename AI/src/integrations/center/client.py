@@ -118,6 +118,111 @@ class CenterClient:
             raise CenterProtocolError("terminal metadata does not match requested terminal")
         return data
 
+    async def get_control(self, terminal_id: str, *, session_id: str | None = None,
+                          after: int | None = None, timeout: float = 0) -> dict[str, Any]:
+        """读取已确认的手柄输入供示范采集使用；不发送、续期或释放任何驾驶操作。"""
+        params = {"timeout": str(finite_number(timeout, "timeout", 0, 20))}
+        if after is not None:
+            if isinstance(after, bool) or not isinstance(after, int) or after < 0:
+                raise ValueError("after must be a nonnegative integer")
+            params["after"] = str(after)
+        if session_id is not None:
+            if not isinstance(session_id, str) or not session_id:
+                raise ValueError("session_id must be a non-empty string")
+            params["session_id"] = session_id
+        data = await self._json("GET", self._path(terminal_id) + "/control", params=params)
+        try:
+            if (data.get("terminal_id") != terminal_id or not isinstance(data.get("session_id"), str)
+                    or not data["session_id"] or (session_id is not None and data["session_id"] != session_id)
+                    or not isinstance(data.get("connected"), bool)
+                    or data.get("status") not in {"idle", "active", "released", "expired", "unconfirmed", "disconnected"}
+                    or isinstance(data.get("revision"), bool) or not isinstance(data.get("revision"), int) or data["revision"] < 0):
+                raise ValueError("invalid control identity or revision")
+            finite_number(data.get("remaining_ms"), "remaining_ms", 0, 5000)
+            state = data.get("state")
+            if not isinstance(state, dict) or set(state) != {"steering", "throttle", "brake", "buttons", "duration_ms"} or not isinstance(state["buttons"], list):
+                raise ValueError("control state requires all action fields")
+            state = Action(**{**state, "buttons": tuple(state["buttons"])}).to_payload()
+            if data["status"] == "active":
+                timestamp(data.get("applied_at"), "applied_at")
+                if not isinstance(data.get("command_id"), str) or not data["command_id"] or state["duration_ms"] <= 0:
+                    raise ValueError("active state requires command identity and positive duration")
+        except (ValueError, TypeError) as exc:
+            raise CenterProtocolError("invalid or mismatched control snapshot") from exc
+        return {**data, "state": state}
+
+    async def get_telemetry(self, terminal_id: str, *, session_id: str | None = None,
+                            after: int | None = None, timeout: float = 0) -> dict[str, Any]:
+        """读取 FH5 实测遥测；after 只返回更大的有效序号，超时状态不携带旧数据。"""
+        params = {"timeout": str(finite_number(timeout, "timeout", 0, 20))}
+        if after is not None:
+            if isinstance(after, bool) or not isinstance(after, int) or after < 0:
+                raise ValueError("after must be a nonnegative integer")
+            params["after"] = str(after)
+        if session_id is not None:
+            if not isinstance(session_id, str) or not session_id:
+                raise ValueError("session_id must be a non-empty string")
+            params["session_id"] = session_id
+        result = await self._json("GET", self._path(terminal_id) + "/telemetry", params=params)
+        try:
+            if (result.get("terminal_id") != terminal_id
+                    or not isinstance(result.get("session_id"), str) or not result["session_id"]
+                    or (session_id is not None and result["session_id"] != session_id)
+                    or not isinstance(result.get("connected"), bool)
+                    or result.get("status") not in {"ready", "waiting", "stale", "disconnected"}
+                    or isinstance(result.get("sequence"), bool)
+                    or not isinstance(result.get("sequence"), int) or result["sequence"] < 0):
+                raise ValueError("invalid telemetry identity, status or sequence")
+            ttl = finite_number(result.get("ttl_ms"), "ttl_ms", 1, 60000)
+            if result.get("age_ms") is not None:
+                finite_number(result["age_ms"], "age_ms", 0, 1e15)
+            for name in ("captured_at", "received_at"):
+                if result.get(name) is not None:
+                    timestamp(result[name], name)
+            if result["status"] == "disconnected" and result["connected"]:
+                raise ValueError("disconnected telemetry requires disconnected terminal")
+            value = result.get("data")
+            if result["status"] != "ready":
+                if value is not None:
+                    raise ValueError("inactive telemetry must not contain data")
+                return result
+            if (not result["connected"] or result["sequence"] <= 0
+                    or (after is not None and result["sequence"] <= after)
+                    or result.get("age_ms") is None or result["age_ms"] > ttl
+                    or result.get("captured_at") is None or result.get("received_at") is None):
+                raise ValueError("ready telemetry requires fresh metadata and increasing sequence")
+            required = {"source", "is_race_on", "timestamp_ms", "speed_mps", "position", "velocity", "yaw"}
+            vectors = {"position", "velocity", "acceleration", "angular_velocity"}
+            floats = {"speed_mps", "yaw", "pitch", "roll", "engine_rpm", "throttle", "brake",
+                      "clutch", "handbrake", "steering"}
+            if (not isinstance(value, dict) or not required <= value.keys()
+                    or value.keys() - (required | vectors | floats | {"gear"})
+                    or value["source"] != "fh5_data_out" or not isinstance(value["is_race_on"], bool)):
+                raise ValueError("telemetry requires verified FH5 Data Out fields")
+            clock = value["timestamp_ms"]
+            if isinstance(clock, bool) or not isinstance(clock, int) or not 0 <= clock < 2**32:
+                raise ValueError("invalid telemetry game timestamp")
+            for name in vectors & value.keys():
+                if not isinstance(value[name], list) or len(value[name]) != 3:
+                    raise ValueError("invalid telemetry vector")
+                for item in value[name]:
+                    finite_number(item, name, -1e12, 1e12)
+            for name in floats & value.keys():
+                low, high = -1e12, 1e12
+                if name in {"throttle", "brake", "clutch", "handbrake"}:
+                    low, high = 0, 1
+                elif name == "steering":
+                    low, high = -1, 1
+                elif name in {"speed_mps", "engine_rpm"}:
+                    low = 0
+                finite_number(value[name], name, low, high)
+            if "gear" in value and (isinstance(value["gear"], bool) or not isinstance(value["gear"], int)
+                                    or not 0 <= value["gear"] <= 255):
+                raise ValueError("invalid telemetry gear")
+        except (ValueError, TypeError) as exc:
+            raise CenterProtocolError("invalid or mismatched telemetry snapshot") from exc
+        return result
+
     @staticmethod
     def _perception(data: dict[str, Any], terminal_id: str,
                     expected_session: str | None = None) -> dict[str, Any]:
@@ -232,20 +337,32 @@ class CenterClient:
             raise CenterProtocolError("invalid acknowledgement time or gamepad state") from exc
         return {**data, "ack": {**ack, "applied_at": float(ack["applied_at"]), "state": normalized}}
 
-    async def action(self, terminal_id: str, action: Action) -> dict[str, Any]:
+    @staticmethod
+    def _command_session(session_id):
+        if session_id is None:
+            return {}
+        if not isinstance(session_id, str) or not 1 <= len(session_id) <= 128:
+            raise ValueError("session_id must be a nonempty string of at most 128 characters")
+        return {"session_id": session_id}
+
+    async def action(self, terminal_id: str, action: Action, *, session_id: str | None = None) -> dict[str, Any]:
         if not isinstance(action, Action):
             raise TypeError("action must be an Action")
-        return self._ack(await self._json("POST", self._path(terminal_id) + "/actions", json=action.to_payload()), terminal_id)
+        return self._ack(await self._json("POST", self._path(terminal_id) + "/actions", json=action.to_payload(),
+                                          params=self._command_session(session_id)), terminal_id)
 
-    async def release(self, terminal_id: str) -> dict[str, Any]:
-        return self._ack(await self._json("POST", self._path(terminal_id) + "/release", json={}), terminal_id)
+    async def release(self, terminal_id: str, *, session_id: str | None = None) -> dict[str, Any]:
+        return self._ack(await self._json("POST", self._path(terminal_id) + "/release", json={},
+                                          params=self._command_session(session_id)), terminal_id)
 
-    async def step(self, terminal_id: str, action: Action, observation_timeout: float = 5) -> StepResult:
+    async def step(self, terminal_id: str, action: Action, observation_timeout: float = 5, *,
+                   session_id: str | None = None) -> StepResult:
         if not isinstance(action, Action):
             raise TypeError("action must be an Action")
         timeout = finite_number(observation_timeout, "observation_timeout", 0.1, 30)
         data = self._ack(await self._json("POST", self._path(terminal_id) + "/step",
-                                        json={"action": action.to_payload(), "observation_timeout": timeout}), terminal_id)
+                                        json={"action": action.to_payload(), "observation_timeout": timeout},
+                                        params=self._command_session(session_id)), terminal_id)
         value = data.get("observation")
         if not isinstance(value, dict) or value.get("content_type") != "image/jpeg":
             raise CenterProtocolError("step requires a JPEG observation")

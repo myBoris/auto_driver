@@ -31,7 +31,9 @@ def main():
                    WindowCapture(args.window_title, args.fps, args.width, args.jpeg_quality, **capture_options))
         config = TerminalConfig(token=args.token, terminal_id=args.terminal_id, name=args.name,
                                 center=args.center, discovery_port=args.discovery_port,
-                                discovery_address=args.discovery_address, stop_file=args.stop_file, mock=args.mock)
+                                discovery_address=args.discovery_address, stop_file=args.stop_file, mock=args.mock,
+                                telemetry_enabled=args.telemetry_enabled, telemetry_host=args.telemetry_host,
+                                telemetry_port=args.telemetry_port)
         asyncio.run(TerminalClient(config, capture, controller).run())
     except KeyboardInterrupt:
         pass

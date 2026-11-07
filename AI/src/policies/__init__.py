@@ -1,7 +1,7 @@
-"""策略接口与管道联调策略；模型推理实现由使用者补充。"""
+"""策略接口、中立联调及已训练模型推理；模块导入不加载 torch。"""
 
 from .base import Policy
-from .driving import DrivingPolicy
+from .driving import DrivingPolicy, DrivingPrediction
 from .neutral import NeutralPolicy
 
-__all__ = ["Policy", "DrivingPolicy", "NeutralPolicy"]
+__all__ = ["Policy", "DrivingPolicy", "DrivingPrediction", "NeutralPolicy"]

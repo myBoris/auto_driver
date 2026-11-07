@@ -19,10 +19,15 @@ class TerminalService:
         self.config = config
         self.sessions = sessions
 
-    def get(self, terminal_id: str) -> TerminalSession:
+    def get(self, terminal_id: str, session_id: str | None = None) -> TerminalSession:
         terminal = self.sessions.get(terminal_id)
         if terminal is None:
             raise APIError(404, "terminal not found")
+        if session_id is not None:
+            if not isinstance(session_id, str) or not 1 <= len(session_id) <= 128:
+                raise APIError(400, "session_id must be a nonempty string of at most 128 characters")
+            if terminal.session_id != session_id:
+                raise APIError(409, "terminal session changed; command was not sent")
         return terminal
 
     def list(self) -> list[dict]:
@@ -66,6 +71,8 @@ class TerminalService:
                 terminal.status = data["status"]
             if isinstance(data.get("capture"), dict):
                 terminal.capture = data["capture"]
+        elif data.get("type") == "telemetry":
+            terminal.telemetry.publish(data)
         elif data.get("type") == "ack":
             command_id = data.get("command_id")
             future = terminal.pending.get(command_id) if isinstance(command_id, str) else None
@@ -80,28 +87,28 @@ class TerminalService:
                 terminal.record_ack(command_id, data)
                 future.set_result(data)
 
-    async def action(self, terminal_id: str, data) -> dict:
-        terminal = self.get(terminal_id)
+    async def action(self, terminal_id: str, data, *, session_id: str | None = None) -> dict:
+        terminal = self.get(terminal_id, session_id)
         action = normalize_action(data)
         epoch = terminal.control_epoch
         async with terminal.operation_lock:
             terminal.check_operation(epoch)
             return await terminal.command(action)
 
-    async def release(self, terminal_id: str) -> dict:
-        terminal = self.get(terminal_id)
+    async def release(self, terminal_id: str, *, session_id: str | None = None) -> dict:
+        terminal = self.get(terminal_id, session_id)
         # 释放不等待训练的观察锁，并取消释放前已排队或等待确认的操作。
         await terminal.cancel_operations()
         return await terminal.command(normalize_action({"duration_ms": 0}))
 
-    async def step(self, terminal_id: str, data: dict) -> dict:
+    async def step(self, terminal_id: str, data: dict, *, session_id: str | None = None) -> dict:
         if data.keys() - {"action", "observation_timeout"}:
             raise APIError(400, "step accepts action and observation_timeout only")
         if "action" not in data:
             raise APIError(400, "step requires action")
         action = normalize_action(data["action"])
         timeout = number(data.get("observation_timeout", 5), "observation_timeout", 0.1, 30)
-        terminal = self.get(terminal_id)
+        terminal = self.get(terminal_id, session_id)
         epoch = terminal.control_epoch
         async with terminal.operation_lock:
             terminal.check_operation(epoch)
