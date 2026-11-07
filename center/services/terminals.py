@@ -77,6 +77,7 @@ class TerminalService:
                     if (isinstance(applied_at, bool) or not isinstance(applied_at, (int, float))
                             or applied_at <= 0 or applied_at > 1e20 or not math.isfinite(applied_at)):
                         raise ValueError("ack.applied_at must be a positive finite timestamp")
+                terminal.record_ack(command_id, data)
                 future.set_result(data)
 
     async def action(self, terminal_id: str, data) -> dict:

@@ -9,10 +9,11 @@ from aiohttp import web
 from .api.middleware import authenticate, errors
 from .api.routes import register_routes
 from .config import CenterConfig
-from .dependencies import BROWSER_COOKIE, BROWSER_TOKEN, CONFIG, MEDIA, SESSIONS, TERMINALS
+from .dependencies import BROWSER_COOKIE, BROWSER_TOKEN, CONFIG, MEDIA, PERCEPTION, SESSIONS, TERMINALS
 from .infrastructure.media_gateway import MediaGateway
 from .infrastructure.runtime import lifecycle, shutdown
 from .services.media import MediaService
+from .services.perception import PerceptionService
 from .services.terminals import TerminalService
 
 
@@ -23,6 +24,7 @@ def create_app(config: CenterConfig | None = None) -> web.Application:
     app[BROWSER_TOKEN] = secrets.token_urlsafe(32)
     app[TERMINALS] = TerminalService(app[CONFIG], app[SESSIONS])
     app[MEDIA] = MediaService(app[CONFIG], app[TERMINALS], MediaGateway(app[CONFIG]))
+    app[PERCEPTION] = PerceptionService(app[TERMINALS])
     register_routes(app)
     app.cleanup_ctx.append(lifecycle)
     app.on_shutdown.append(shutdown)

@@ -1,7 +1,7 @@
 /* 页面编排模块：协调终端列表、视频生命周期与驾驶权限；具体网络、视频和输入逻辑由各自模块负责。 */
 (() => {
   'use strict';
-  const { CenterApi, DrivingControls, WebRtcPlayer } = window.AutoDriver;
+  const { CenterApi, DrivingControls, WebRtcPlayer, PerceptionOverlay, ControlMonitor } = window.AutoDriver;
 
   class Dashboard {
     constructor() {
@@ -11,9 +11,24 @@
         canControl: () => this.online && !!this.current()?.connected && !this.leaving && !document.hidden,
         onError: (message) => this.notice(message, true), onStatus: (message) => { this.element('command-status').textContent = message; },
       });
+      this.controlMonitor = ControlMonitor ? new ControlMonitor({ api: this.api,
+        getContext: () => ({ terminalId: this.selected, sessionId: this.current()?.session_id || '',
+          connected: this.online && !!this.current()?.connected && !this.leaving }),
+        onState: (snapshot) => {
+          this.controls.setObservedState(snapshot);
+          if (!this.controls.localInputEngaged()) this.element('command-status').textContent = {
+            idle: '待命', active: '终端执行中', released: '已释放', expired: '指令已到期', unconfirmed: '执行未确认', disconnected: '终端已离线',
+          }[this.controls.observedState?.status] || '等待状态';
+        },
+      }) : null;
       this.player = new WebRtcPlayer({ api: this.api, video: this.element('frame'),
         onState: (state) => this.renderVideo(state), onMetrics: (metrics) => this.renderMetrics(metrics),
       });
+      this.videoPlaying = false;
+      this.perception = PerceptionOverlay ? new PerceptionOverlay({ api: this.api, video: this.element('frame'), stage: this.element('video-stage'),
+        getContext: () => ({ terminalId: this.selected, sessionId: this.current()?.session_id || '',
+          playing: this.videoPlaying && this.online && !!this.current()?.connected && !this.leaving }),
+      }) : null;
       this.element('refresh').addEventListener('click', () => { void this.refresh(); });
       this.element('terminal').addEventListener('change', () => this.select(this.element('terminal').value));
       document.addEventListener('visibilitychange', () => {
@@ -56,6 +71,8 @@
       hardware.title = hardware.textContent;
       hardware.classList.toggle('error', !!(status.capture?.error || status.control?.error));
       this.controls.sync();
+      this.controlMonitor?.sync();
+      this.perception?.sync();
     }
 
     renderVideo({ kind, message }) {
@@ -63,6 +80,7 @@
       this.element('stream-status').textContent = labels[kind] || '等待视频';
       this.element('stream-status').dataset.state = kind;
       const playing = kind === 'playing';
+      this.videoPlaying = playing;
       this.element('video-panel').classList.toggle('playing', playing);
       this.element('frame').hidden = !playing;
       this.element('placeholder').hidden = playing;
@@ -72,6 +90,7 @@
         this.element('fps').textContent = '—'; this.element('resolution').textContent = '—';
         this.element('frame-time').textContent = kind === 'paused' ? '视频已暂停' : '尚未接收视频';
       }
+      this.perception?.sync();
     }
 
     renderMetrics({ fps, decoded, width, height, measurement }) {

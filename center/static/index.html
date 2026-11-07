@@ -9,6 +9,8 @@
   <script defer src="/static/api.js"></script>
   <script defer src="/static/video-player.js"></script>
   <script defer src="/static/controls.js"></script>
+  <script defer src="/static/control-monitor.js"></script>
+  <script defer src="/static/perception.js"></script>
   <script defer src="/static/dashboard.js"></script>
 </head>
 <body>
@@ -42,21 +44,24 @@
     </section>
     <div class="workspace">
       <section id="video-panel" class="panel video-panel" aria-label="实时游戏画面">
-        <div class="panel-heading"><div class="video-title"><span class="live-mark" aria-hidden="true"></span><h1 id="terminal-name">游戏画面</h1></div><span class="heading-note">实时画面</span></div>
-        <div class="video">
+        <div class="panel-heading video-heading"><div class="video-title"><span class="live-mark" aria-hidden="true"></span><h1 id="terminal-name">游戏画面</h1></div><div class="overlay-options" role="group" aria-label="画面辅助叠加"><label><input type="checkbox" id="overlay-road" checked><span class="overlay-key road-key" aria-hidden="true"></span>道路检测</label><label><input type="checkbox" id="overlay-direction" checked><span class="overlay-key direction-key" aria-hidden="true"></span>方向预测</label><button type="button" id="overlay-demo" class="overlay-demo" aria-pressed="false" title="预览本地示意数据，不发送驾驶指令">演示</button></div></div>
+        <div class="video" id="video-stage">
           <div class="placeholder" id="placeholder"><svg width="52" height="42" viewBox="0 0 52 42" fill="none" aria-hidden="true"><rect x="2" y="2" width="48" height="31" rx="4" stroke="currentColor" stroke-width="2"/><path d="M17 40h18M26 33v7M20 13l13 6-13 6V13Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg><strong id="placeholder-title">等待游戏画面</strong><p id="placeholder-detail">终端上线后，画面会自动显示。</p></div>
           <video id="frame" autoplay muted playsinline aria-label="游戏终端实时视频" hidden></video>
+          <svg id="perception-overlay" class="perception-overlay" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true" hidden><polygon id="perception-road" class="perception-road"/><polyline id="perception-direction-line" class="perception-direction-line"/><path id="perception-arrow" class="perception-arrow"/></svg>
+          <div class="perception-hud" id="perception-hud" hidden><div class="perception-hud-caption"><span class="perception-indicator" aria-hidden="true"></span><span>AI 道路辅助</span><span id="perception-demo-badge" class="perception-demo-badge" hidden>演示数据</span></div><span id="perception-status" class="perception-status" role="status">等待视频</span><strong id="perception-direction" class="perception-direction" hidden></strong><span id="perception-metrics" class="perception-metrics" hidden></span><span id="perception-source" class="perception-source" hidden></span></div>
         </div>
         <div class="frame-note"><span id="frame-time">尚未接收视频</span><span>H.264 · WebRTC</span></div>
       </section>
       <aside class="panel control-panel" aria-label="手动驾驶控制">
         <div class="panel-heading"><h2>驾驶控制</h2><span class="heading-note">选择一种方式开始</span><span id="control-mode-status" class="sr-only">键盘模式</span></div>
-        <div class="controls">
+        <div class="controls" id="driving-controls">
           <div class="mode-tabs" role="tablist" aria-label="选择控制方式">
             <button type="button" id="mode-keyboard" role="tab" data-mode="keyboard" aria-controls="panel-keyboard" aria-selected="true" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M5 9h2m2 0h2m2 0h2m2 0h2M5 12h2m2 0h2m2 0h2m2 0h2M7 15h10"/></svg>键盘</button>
             <button type="button" id="mode-gamepad" role="tab" data-mode="gamepad" aria-controls="panel-gamepad" aria-selected="false" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M7 6h10c3 0 4 4 5 10 .5 3-2 4-4 1l-2-2H8l-2 2c-2 3-4.5 2-4-1 1-6 2-10 5-10Z"/><path d="M5 10h6m-3-3v6m9-4h.01m2 3h.01" stroke-linecap="round"/></svg>手柄</button>
             <button type="button" id="mode-racing" role="tab" data-mode="racing" aria-controls="panel-racing" aria-selected="false" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><path d="m4 8 6 3m10-3-6 3m-2 3v7"/></svg>赛车模拟</button>
           </div>
+          <div id="control-execution" class="control-execution" role="status">终端执行：等待状态</div>
           <section id="panel-keyboard" class="mode-panel" role="tabpanel" aria-labelledby="mode-keyboard" data-mode-panel="keyboard">
             <div class="keyboard-intro"><label class="keyboard"><input type="checkbox" id="keyboard">启用键盘</label><span>WASD / 方向键</span></div>
             <div class="keyboard-driving">
@@ -120,7 +125,7 @@
                 <button type="button" id="racing-wheel" class="racing-wheel" role="slider" aria-label="方向盘，左右方向键微调，Home 回正" aria-valuemin="-100" aria-valuemax="100" aria-valuenow="0" aria-valuetext="居中" disabled><svg viewBox="0 0 200 200" fill="none" aria-hidden="true"><circle cx="100" cy="100" r="82" fill="#101720" stroke="#354758" stroke-width="17"/><path d="M100 18v12" stroke="#91ebba" stroke-width="5" stroke-linecap="round"/><path d="m24 76 56 18m96-18-56 18m-20 27v60" stroke="#354758" stroke-width="15"/><circle cx="100" cy="100" r="25" fill="#1b2a36" stroke="#4d6577" stroke-width="2"/><path d="m89 103 11-10 11 10" stroke="#91ebba" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="55" cy="82" r="4" fill="#91ebba"/><circle cx="145" cy="82" r="4" fill="#91ebba"/></svg></button>
                 <button type="button" id="wheel-reset" class="text-button" disabled>方向回正</button>
               </div>
-              <div class="steering-setting"><div class="setting"><label for="racing-steering">转向 <output id="racing-steering-value">居中</output></label><input id="racing-steering" type="range" min="-100" max="100" value="0" disabled><div class="range-labels"><span>左</span><span>右</span></div></div><p class="control-note">拖动方向盘，松手回正。<br>滑杆可保持转向角度。</p></div>
+              <div class="steering-setting"><div class="setting"><label for="racing-steering">转向 <output id="racing-steering-value">居中</output></label><input id="racing-steering" type="range" min="-100" max="100" value="0" aria-describedby="steering-instructions" disabled><div class="range-labels"><span>左</span><span>右</span></div></div><p class="control-note" id="steering-instructions">拖动方向盘或滑杆转向。<br>松手或松键自动回正。</p></div>
             </div>
             <div class="shift-buttons"><button type="button" class="drive" data-control="X" data-input-mode="racing" disabled>− 降挡 <span>X</span></button><button type="button" class="drive" data-control="B" data-input-mode="racing" disabled>+ 升挡 <span>B</span></button></div>
             <section class="pedal-section" aria-label="赛车模拟踏板力度">
@@ -149,9 +154,9 @@
               <p>按住屏幕按钮或 Enter 操作，松开释放。Space 释放全部输入。</p>
               <p>赛车模式提供三只踏板：按住并向下拖动增加力度，松开立即归零。方向键微调，End 踩满，松键归零；Home、↺ 可释放该踏板，Space 清空全部输入。触摸取消或失焦也会释放。</p>
               <p>键盘使用 WASD / 方向键驾驶，C 离合，Q 降挡、E 升挡。展开“按键力度”可设置 W / S / C 的按住力度；普通键盘无法感知按压力。</p>
-              <p>方向盘松手回正，Home 也可回正。换挡对应 X / B。游戏需开启手动挡＋离合，并将 LB 绑定为离合；当前虚拟手柄的离合仅支持开关，0% 松开，非零踩下。</p>
+              <p>方向盘和转向滑块松手或松键自动回正；方向盘 Home 也可回正。换挡对应 X / B。游戏需开启手动挡＋离合，并将 LB 绑定为离合；当前虚拟手柄的离合仅支持开关，0% 松开，非零踩下。</p>
               <p>标准实体手柄：左摇杆转向，RT 油门、LT 刹车，LB 离合；扳机旁同步显示力度。连接后按任意键识别，浏览器需支持 Gamepad API，通常需通过 HTTPS 或 localhost 访问。</p>
-              <p>切换模式、终端或窗口失焦时自动释放；实体手柄需回中后恢复。手动驾驶与训练程序共享终端输入。</p>
+              <p>切换模式、终端或窗口失焦时自动释放本地输入；实体手柄需回中后恢复。API 执行的驾驶动作会同步显示，查看状态和切换控制方式不影响 API 输入。离合按 LB 开关显示为 0% 或 100%。</p>
             </div></details>
             <button type="button" class="release" id="release" disabled><span>■ 全部释放</span><kbd>SPACE</kbd></button>
           </div>

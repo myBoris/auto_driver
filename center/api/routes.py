@@ -3,7 +3,7 @@
 from aiohttp import web
 from . import web as pages
 from .terminal_socket import terminal_socket
-from .v1 import media, terminals
+from .v1 import media, perception, terminals
 
 
 def register_routes(app):
@@ -12,8 +12,11 @@ def register_routes(app):
         web.get("/dashboard-session", pages.dashboard_session),
         web.get("/api/terminals", terminals.terminals),
         web.get("/api/terminals/{terminal_id}", terminals.terminal),
+        web.get("/api/terminals/{terminal_id}/control", terminals.control),
         web.get("/api/terminals/{terminal_id}/frame", terminals.frame),
         web.get("/api/terminals/{terminal_id}/stream", terminals.stream),
+        web.get("/api/terminals/{terminal_id}/perception", perception.perception),
+        web.post("/api/terminals/{terminal_id}/perception", perception.publish),
         web.post("/api/terminals/{terminal_id}/actions", terminals.actions),
         web.post("/api/terminals/{terminal_id}/release", terminals.release),
         web.post("/api/terminals/{terminal_id}/step", terminals.step),

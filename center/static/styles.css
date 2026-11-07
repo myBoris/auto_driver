@@ -62,6 +62,36 @@ h1, h2 { margin: 0; font-size: 14px; font-weight: 600; }
 .video-panel { display: flex; flex-direction: column; overflow: hidden; }
 .video { display: flex; flex: 1; align-items: center; justify-content: center; position: relative; min-height: 300px; aspect-ratio: 16 / 9; background: #080d13; }
 .video video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.video-heading .video-title { flex: 1; }
+.overlay-options { display: flex; align-items: center; flex-shrink: 0; gap: 14px; }
+.overlay-options label { display: inline-flex; align-items: center; gap: 5px; color: #b7c6d6; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.overlay-options input { width: 13px; height: 13px; margin: 0; accent-color: var(--green); }
+.overlay-demo { min-height: 26px; padding: 3px 8px; border-color: #354758; background: transparent; color: #a7b9c9; font-size: 11px; }
+.overlay-demo[aria-pressed="true"] { border-color: #8a6e3d; background: #49391f; color: #ffdb9c; }
+.overlay-key { width: 6px; height: 6px; border-radius: 2px; background: #75e5b5; }
+.direction-key { background: #f8cb78; }
+.perception-overlay { position: absolute; z-index: 1; overflow: hidden; pointer-events: none; }
+.perception-road { fill: #60e2ac2e; stroke: #7cf0b8b3; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.perception-direction-line { fill: none; stroke: #ffd487; stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; filter: drop-shadow(0 1px 3px #000b); }
+.perception-arrow { fill: none; stroke: #ffd487; stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; filter: drop-shadow(0 1px 3px #000b); }
+.perception-hud { position: absolute; z-index: 2; top: 12px; right: 12px; display: grid; gap: 5px; max-width: min(210px, calc(100% - 24px)); padding: 10px 12px; border: 1px solid #738b993d; border-radius: 8px; background: #091219d9; box-shadow: 0 3px 14px #0003; pointer-events: none; }
+.perception-hud-caption { display: flex; align-items: center; gap: 6px; color: #c1d0dc; font-size: 11px; letter-spacing: .3px; }
+.perception-indicator { width: 5px; height: 5px; flex-shrink: 0; border-radius: 50%; background: #728393; }
+.perception-hud[data-state="ready"] .perception-indicator { background: #91ebba; box-shadow: 0 0 7px #91ebba44; }
+.perception-hud[data-state="demo"] .perception-indicator { background: #ffd487; }
+.perception-demo-badge { margin-left: 2px; padding: 2px 4px; border: 1px solid #98723e; border-radius: 3px; color: #ffda92; background: #56401c; font-size: 10px; letter-spacing: 0; white-space: nowrap; }
+.perception-status { color: #a7b7c7; font-size: 12px; line-height: 1.5; }
+.perception-direction { color: #ffd487; font-size: 15px; font-weight: 600; line-height: 1.4; font-variant-numeric: tabular-nums; }
+.perception-metrics { color: #a9bdcc; font-size: 11px; font-variant-numeric: tabular-nums; }
+.perception-source { color: #8297a8; font-size: 10px; }
+@media (max-width: 540px) {
+  .video-panel .video-heading { height: auto; min-height: 52px; flex-wrap: wrap; gap: 10px; padding: 12px 14px; }
+  .video-heading .video-title { flex-basis: 100%; }
+  .overlay-options { width: 100%; gap: 20px; }
+  .overlay-demo { margin-left: auto; }
+  .perception-hud { top: 8px; right: 8px; max-width: calc(100% - 16px); padding: 8px 9px; gap: 3px; }
+  .perception-direction { font-size: 13px; }
+}
 .placeholder { padding: 24px; text-align: center; color: var(--muted); }
 .placeholder svg { display: block; margin: 0 auto 20px; color: #50677e; }
 .placeholder strong { display: block; margin-bottom: 10px; color: #c9d5e2; font-size: 16px; font-weight: 500; }
@@ -76,6 +106,10 @@ h1, h2 { margin: 0; font-size: 14px; font-weight: 600; }
 .mode-tabs button:hover:enabled { background: #1b2531; border-color: transparent; }
 .mode-tabs button[aria-selected="true"]:hover:enabled { background: #294a3b; border-color: #456d57; }
 .mode-panel { flex: 1; min-width: 0; }
+.control-execution { margin: -4px 0 12px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 11px; line-height: 1.6; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.control-execution[data-state="active"], .control-execution[data-state="local"] { border-color: #365b48; background: #15271f; color: #b4e6c9; }
+.control-execution[data-state="unconfirmed"], .control-execution[data-state="disconnected"] { color: #edb39a; }
+.observing-execution button.observed:disabled, .observing-execution #racing-wheel:disabled, .observing-execution #racing-steering:disabled, .observing-execution .pedal:has(input:disabled) { opacity: 1; }
 #panel-racing { display: flex; flex-direction: column; }
 #panel-racing .pedal-section { margin-top: auto; }
 #panel-racing > .shift-buttons { margin-bottom: 8px; }
@@ -105,6 +139,12 @@ button.held { background: #294f3b; border-color: var(--green); color: #c6f9dc; }
 .setting label { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #bac7d6; font-size: 13px; }
 .setting output { color: #e0e9f2; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 input[type="range"] { display: block; width: 100%; height: 18px; margin: 12px 0 0; accent-color: var(--green); cursor: pointer; touch-action: pan-y; }
+#racing-steering { --steering-fill-start: 50%; --steering-fill-end: 50%; appearance: none; -webkit-appearance: none; background: transparent; }
+#racing-steering::-webkit-slider-runnable-track { height: 6px; border-radius: 4px; background: linear-gradient(to right, transparent calc(50% - .5px), #8799aa calc(50% - .5px), #8799aa calc(50% + .5px), transparent calc(50% + .5px)), linear-gradient(to right, #344251 var(--steering-fill-start), var(--green) var(--steering-fill-start), var(--green) var(--steering-fill-end), #344251 var(--steering-fill-end)); box-shadow: inset 0 0 0 1px #607183; }
+#racing-steering::-webkit-slider-thumb { width: 14px; height: 14px; margin-top: -4px; border: 0; border-radius: 50%; appearance: none; -webkit-appearance: none; background: var(--green); }
+#racing-steering::-moz-range-track { height: 6px; border-radius: 4px; background: linear-gradient(to right, transparent calc(50% - .5px), #8799aa calc(50% - .5px), #8799aa calc(50% + .5px), transparent calc(50% + .5px)), linear-gradient(to right, #344251 var(--steering-fill-start), var(--green) var(--steering-fill-start), var(--green) var(--steering-fill-end), #344251 var(--steering-fill-end)); box-shadow: inset 0 0 0 1px #607183; }
+#racing-steering::-moz-range-progress { height: 6px; background: transparent; }
+#racing-steering::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: var(--green); }
 .keyboard-settings { display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
 .keyboard-settings .setting { display: grid; grid-template-columns: 104px minmax(0, 1fr); align-items: center; gap: 20px; min-height: 26px; }
 .keyboard-settings input { margin: 0; }

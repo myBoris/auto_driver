@@ -55,6 +55,8 @@ flowchart LR
 
 AI 获取带时间戳的 JPEG 观察，不从浏览器 WebRTC 视频里抓图；WebRTC 继续供人查看驾驶画面。AI 不需要启动游戏采集驱动，也不直接操作 ViGEmBus。Center 与 Terminal 的部署见各自目录说明。
 
+模型可通过 `CenterClient.publish_perception()` 将道路轮廓、中心线和预测转向发布到 Center，管理页会叠加在实时视频上；该方法只用于显示，不发送驾驶操作。`examples/publish_perception.py` 提供带“演示数据”标记的联调示例。字段和有效期见 [显示接口文档](../center/docs/perception.md)。
+
 ## uv 环境与连接配置
 
 在 AI 目录执行：

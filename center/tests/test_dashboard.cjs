@@ -161,9 +161,166 @@ async function dashboard() {
     mode(name) { emit(document.querySelector(`[data-mode="${name}"]`), 'click'); },
     interval(ms) { for (const timer of intervals.values()) if (timer.ms === ms) timer.callback(); },
     advance(ms) { clock.now += ms; for (const [id, timer] of [...timers]) if (timer.at <= clock.now) { timers.delete(id); timer.callback(); } },
-    dispose() { app.leaving = true; app.player.stop(); },
+    dispose() { app.leaving = true; app.player.stop(); app.perception?.destroy(); app.controlMonitor?.destroy(); },
   };
 }
+
+const controlSnapshot = (overrides = {}) => ({
+  terminal_id: 'one', session_id: 'control-one', revision: 1, connected: true,
+  status: 'active', remaining_ms: 1400,
+  state: { steering: -.42, throttle: .63, brake: .18, buttons: ['LB', 'X', 'A'], duration_ms: 1500 },
+  ...overrides,
+});
+
+async function controlPage(snapshot = controlSnapshot()) {
+  const h = await dashboard();
+  h.state.terminals[0].session_id = 'control-one'; h.state.terminals[1].session_id = 'control-two';
+  h.state.control = snapshot;
+  h.state.handler = request => request.url.includes('/control?') ? ok(h.state.control) : undefined;
+  h.app.renderTerminal(); await flush();
+  return h;
+}
+
+test('API execution drives all three visual control modes without sending or renewing input', async () => {
+  const h = await controlPage();
+  assert.equal(h.control('left').getAttribute('aria-pressed'), 'true');
+  for (const name of ['throttle', 'brake', 'clutch', 'X']) assert.equal(h.control(name).classList.contains('observed'), true, name);
+  assert.match(h.get('control-execution').textContent, /左 42%.*油门 63%.*刹车 18%.*离合 100%.*降挡/);
+  assert.equal(h.get('command-status').textContent, '终端执行中');
+  assert.equal(h.get('throttle-level').value, '60', 'the keyboard strength preset is independent of external execution');
+  h.mode('gamepad'); await flush();
+  assert.equal(h.get('gamepad-steering').textContent, '-42%');
+  assert.equal(h.get('gamepad-throttle').textContent, '63%');
+  assert.equal(h.get('gamepad-brake').textContent, '18%');
+  for (const name of ['A', 'LB', 'X']) assert.equal(h.control(name).getAttribute('aria-pressed'), 'true');
+  h.mode('racing'); await flush();
+  assert.equal(h.get('racing-steering').value, '-42');
+  assert.ok(Math.abs(parseFloat(h.get('racing-wheel').style.getPropertyValue('--wheel-angle')) + 56.7) < .001);
+  for (const [axis, value] of [['throttle', '63'], ['brake', '18'], ['clutch', '100']]) assert.equal(h.get(`pedal-${axis}`).value, value);
+  assert.equal(h.app.controls.activeInput(), false); assert.equal(h.app.controls.held.size, 0);
+  h.interval(100); h.interval(100); await flush();
+  assert.equal(h.actions().length, 0); assert.equal(h.releases().length, 0); h.dispose();
+});
+
+test('API release, expiry, rejected execution and disconnect clear visual axes and buttons', async (t) => {
+  for (const status of ['idle', 'released', 'expired', 'unconfirmed', 'disconnected']) await t.test(status, async () => {
+    const h = await controlPage(); h.mode('racing'); await flush();
+    h.state.control = controlSnapshot({ revision: 2, status, connected: status !== 'disconnected', remaining_ms: 0 });
+    h.advance(0); await flush();
+    assert.equal(h.get('racing-steering').value, '0');
+    assert.equal(h.get('pedal-throttle').value, '0'); assert.equal(h.get('pedal-brake').value, '0'); assert.equal(h.get('pedal-clutch').value, '0');
+    assert.equal(h.control('X').getAttribute('aria-pressed'), 'false');
+    assert.equal(h.get('control-execution').dataset.state, status);
+    assert.notEqual(h.get('command-status').textContent, '终端执行中');
+    assert.equal(h.actions().length, 0); assert.equal(h.releases().length, 0); h.dispose();
+  });
+});
+
+test('external API display survives window blur and read-only lifecycle operations never release it', async (t) => {
+  for (const trigger of [
+    h => h.emit(h.window, 'blur'),
+    h => h.mode('racing'),
+    h => { h.get('keyboard').checked = true; h.emit(h.get('keyboard'), 'change'); },
+    h => { h.document.hidden = true; h.emit(h.document, 'visibilitychange'); },
+    h => h.emit(h.window, 'pagehide'),
+    h => h.app.select('two'),
+  ]) await t.test(trigger.toString(), async () => {
+    const h = await controlPage(); trigger(h); h.interval(100); await flush();
+    assert.equal(h.actions().length, 0); assert.equal(h.releases().length, 0); h.dispose();
+  });
+  const h = await controlPage(); h.state.focused = false; h.emit(h.window, 'blur');
+  h.state.control = controlSnapshot({ revision: 2, state: { steering: .31, throttle: .55, brake: 0, buttons: ['B'], duration_ms: 1500 } });
+  h.advance(0); await flush();
+  assert.equal(h.control('right').getAttribute('aria-pressed'), 'true');
+  assert.match(h.get('control-execution').textContent, /右 31%.*油门 55%.*升挡/);
+  assert.equal(h.control('right').disabled, true, 'an unfocused observer keeps displaying but cannot drive'); h.dispose();
+});
+
+test('explicit release and Space can stop observed API input without holding local controls', async (t) => {
+  for (const trigger of [h => h.emit(h.get('release'), 'click'), h => h.emit(h.window, 'keydown', { code: 'Space' })]) await t.test(trigger.toString(), async () => {
+    const h = await controlPage(); trigger(h); await flush();
+    assert.equal(h.actions().length, 0); assert.equal(h.releases().length, 1);
+    assert.equal(h.control('throttle').getAttribute('aria-pressed'), 'false'); h.dispose();
+  });
+});
+
+test('local actions take precedence without inheriting observed axes, buttons or keyboard presets', async () => {
+  const h = await controlPage(); h.press('throttle'); await flush();
+  assert.deepEqual(h.actions().at(-1).body, { steering: 0, throttle: .6, brake: 0, buttons: [], duration_ms: 250 });
+  h.state.control = controlSnapshot({ revision: 2 }); h.advance(0); await flush();
+  assert.match(h.get('control-execution').textContent, /本地操作/);
+  assert.equal(h.control('left').getAttribute('aria-pressed'), 'false');
+  h.lift('throttle'); await flush();
+  assert.equal(h.control('throttle').getAttribute('aria-pressed'), 'false');
+  h.advance(0); await flush();
+  assert.equal(h.control('throttle').getAttribute('aria-pressed'), 'false', 'a repeated old execution cannot restore a just-released local input');
+  assert.notEqual(h.get('command-status').textContent, '终端执行中');
+  h.state.control = controlSnapshot({ revision: 3 }); h.advance(0); await flush();
+  assert.equal(h.control('left').getAttribute('aria-pressed'), 'true', 'a fresh external command resumes observation');
+  const count = h.actions().length; h.interval(100); await flush(); assert.equal(h.actions().length, count); h.dispose();
+});
+
+test('long-poll waiting does not consume the duration of a newly received API action', async () => {
+  const pending = deferred(); const h = await controlPage(controlSnapshot({ revision: 0, status: 'idle', remaining_ms: 0 }));
+  h.state.handler = request => request.url.includes('/control?') ? pending.promise : undefined;
+  h.advance(0); await flush();
+  const request = h.requestLog.filter(request => request.url.includes('/control?')).at(-1);
+  assert.match(request.url, /timeout=20&after=0/);
+  h.advance(12000); await flush();
+  assert.equal(request.options.signal.aborted, false, 'the client timeout must exceed the server long poll');
+  pending.resolve(ok(controlSnapshot({ remaining_ms: 200, state: { steering: .5, throttle: 1, brake: 0, buttons: [], duration_ms: 250 } })));
+  await flush(); assert.equal(h.control('throttle').getAttribute('aria-pressed'), 'true');
+  assert.equal(h.get('command-status').textContent, '终端执行中'); h.dispose();
+});
+
+test('the display expires API input locally and repeated snapshots cannot extend its lifetime', async () => {
+  const h = await controlPage(); h.advance(800); await flush();
+  assert.equal(h.control('throttle').getAttribute('aria-pressed'), 'true');
+  h.advance(601); await flush();
+  assert.equal(h.control('throttle').getAttribute('aria-pressed'), 'false');
+  assert.equal(h.get('command-status').textContent, '指令已到期');
+  assert.equal(h.actions().length, 0); assert.equal(h.releases().length, 0); h.dispose();
+});
+
+test('old in-flight control replies are aborted and cannot cross a terminal switch', async () => {
+  const h = await controlPage(); const pending = deferred();
+  h.state.handler = request => request.url.includes('/control?') ? request.url.includes('/one/') ? pending.promise : ok(controlSnapshot({ terminal_id: 'two', session_id: 'control-two', revision: 0, status: 'idle', remaining_ms: 0 })) : undefined;
+  h.advance(0); await flush();
+  const request = h.requestLog.filter(request => request.url.includes('/control?')).at(-1);
+  h.app.select('two'); assert.equal(request.options.signal.aborted, true);
+  pending.resolve(ok(controlSnapshot({ revision: 2 }))); await flush(); h.advance(0); await flush();
+  assert.equal(h.app.controls.observedState.terminal_id, 'two');
+  assert.equal(h.control('throttle').getAttribute('aria-pressed'), 'false');
+  assert.equal(h.actions().length, 0); assert.equal(h.releases().length, 0); h.dispose();
+});
+
+test('a reconnected terminal may restart revisions and cannot retain the previous execution', async () => {
+  const h = await controlPage(controlSnapshot({ revision: 99 }));
+  h.state.terminals = [{ ...h.state.terminals[0], session_id: 'new-session' }];
+  h.state.control = controlSnapshot({ session_id: 'new-session', revision: 0, status: 'idle', remaining_ms: 0 });
+  await h.app.refresh(); await flush();
+  assert.equal(h.app.controls.observedState.session_id, 'new-session');
+  assert.equal(h.app.controlMonitor.revision, 0);
+  assert.equal(h.control('throttle').getAttribute('aria-pressed'), 'false');
+  assert.equal(h.actions().length, 0); assert.equal(h.releases().length, 0); h.dispose();
+});
+
+test('failed or malformed control reads clear stale execution and retry without driving', async (t) => {
+  for (const response of [
+    { ok: false, status: 503, json: async () => ({ error: 'unavailable' }) },
+    ok(controlSnapshot({ revision: 2, session_id: 'old-session' })),
+    ok(controlSnapshot({ revision: 2, state: { steering: 2, throttle: 0, brake: 0, buttons: [], duration_ms: 100 } })),
+  ]) await t.test(`status ${response.status}`, async () => {
+    const h = await controlPage();
+    h.state.handler = request => request.url.includes('/control?') ? response : undefined;
+    h.advance(0); await flush();
+    assert.equal(h.control('throttle').getAttribute('aria-pressed'), 'false');
+    assert.equal(h.get('command-status').textContent, '等待状态');
+    h.state.handler = request => request.url.includes('/control?') ? ok(controlSnapshot({ revision: 3 })) : undefined;
+    h.advance(1000); await flush(); assert.equal(h.control('throttle').getAttribute('aria-pressed'), 'true');
+    assert.equal(h.actions().length, 0); assert.equal(h.releases().length, 0); h.dispose();
+  });
+});
 
 test('every rendered hold control produces its mode-specific full state and pointer release', async (t) => {
   const page = await dashboard();
@@ -346,7 +503,17 @@ const setRange = (h, id, value) => {
     const axis = id.slice(6); const pointerId = pedalPointer(axis);
     if (!h.app.controls.pedalPointers.has(pointerId)) h.emit(h.get(id), 'pointerdown', { pointerId });
   }
+  if (id === 'racing-steering' && !h.app.controls.steeringPointers.has(110)) h.emit(h.get(id), 'pointerdown', { pointerId: 110 });
   inputRange(h, id, value);
+};
+const assertSteeringCentered = (h) => {
+  const input = h.get('racing-steering');
+  assert.equal(input.value, '0'); assert.equal(input.getAttribute('aria-valuetext'), '居中');
+  assert.equal(input.style.getPropertyValue('--steering-fill-start'), '50%');
+  assert.equal(input.style.getPropertyValue('--steering-fill-end'), '50%');
+  assert.equal(h.get('racing-steering-value').textContent, '居中');
+  assert.equal(h.get('racing-wheel').getAttribute('aria-valuenow'), '0');
+  assert.equal(h.get('racing-wheel').style.getPropertyValue('--wheel-angle'), '0deg');
 };
 function physicalPad({ steering = 0, throttle = 0, brake = 0, pressed = [] } = {}) {
   return { id: 'Test standard controller', index: 0, connected: true, mapping: 'standard', axes: [steering, 0, 0, 0], buttons: Array.from({ length: 17 }, (_, index) => {
@@ -619,7 +786,166 @@ test('keyboard Q and E send downshift and upshift buttons and release after focu
   h.dispose();
 });
 
-test('racing analog axes compose exact strengths, renew, shift and reset together', async () => {
+test('steering slider springs to center on release, cancellation, lost capture and outside release', async (t) => {
+  for (const [target, type] of [['slider', 'pointerup'], ['slider', 'pointercancel'], ['slider', 'lostpointercapture'], ['window', 'pointerup'], ['window', 'pointercancel']]) await t.test(`${target}/${type}`, async () => {
+    const h = await dashboard(); h.mode('racing'); await flush(); const input = h.get('racing-steering');
+    const releases = h.releases().length;
+    const down = h.emit(input, 'pointerdown', { pointerId: 110 }); assert.equal(down.defaultPrevented, false);
+    inputRange(h, input.id, 63); await flush(); assert.equal(h.actions().at(-1).body.steering, .63);
+    assert.equal(input.style.getPropertyValue('--steering-fill-start'), '50%');
+    assert.equal(input.style.getPropertyValue('--steering-fill-end'), '81.5%');
+    h.emit(target === 'slider' ? input : h.window, type, { pointerId: 110 }); await flush();
+    assertSteeringCentered(h); assert.equal(h.releases().length, releases + 1); assert.equal(h.app.controls.activeInput(), false);
+    const count = h.actions().length;
+    inputRange(h, input.id, -89); h.emit(input, 'change'); h.emit(input, 'lostpointercapture', { pointerId: 110 }); h.interval(100); await flush();
+    assertSteeringCentered(h); assert.equal(h.actions().length, count); assert.equal(h.releases().length, releases + 1); h.dispose();
+  });
+});
+
+test('centering the steering slider preserves held pedals and shift and keeps the keyboard steering preset', async () => {
+  const h = await dashboard(); h.mode('racing'); await flush();
+  setRange(h, 'pedal-throttle', 37); setRange(h, 'pedal-brake', 19); setRange(h, 'pedal-clutch', 28); h.press('B', 7);
+  setRange(h, 'racing-steering', -43); await flush(); const input = h.get('racing-steering');
+  assert.equal(input.style.getPropertyValue('--steering-fill-start'), '28.5%');
+  assert.equal(input.style.getPropertyValue('--steering-fill-end'), '50%');
+  h.emit(input, 'blur'); await flush(); assert.equal(h.app.controls.racing.steering, -.43, 'touch focus change keeps an active slider pointer');
+  const releases = h.releases().length;
+  h.emit(h.window, 'pointerup', { pointerId: 110 }); await flush(); assertSteeringCentered(h);
+  assert.deepEqual(h.actions().at(-1).body, { steering: 0, throttle: .37, brake: .19, buttons: ['B', 'LB'], duration_ms: 250 });
+  assert.equal(h.releases().length, releases); assert.equal(h.get('steering-level').value, '70');
+  h.emit(h.get('release'), 'click'); await flush(); h.dispose();
+});
+
+test('steering range keys spring to center on keyup and focus loss and reject released repeats', async (t) => {
+  for (const code of ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown']) await t.test(code, async () => {
+    const h = await dashboard(); h.mode('racing'); await flush(); const input = h.get('racing-steering');
+    const down = h.emit(input, 'keydown', { code }); assert.equal(down.defaultPrevented, false);
+    const value = code === 'Home' ? -100 : code === 'End' ? 100 : -37;
+    inputRange(h, input.id, value); await flush(); assert.equal(h.actions().at(-1).body.steering, value / 100);
+    h.emit(input, 'keydown', { code, repeat: true }); inputRange(h, input.id, 21); await flush();
+    assert.equal(h.actions().at(-1).body.steering, .21);
+    h.emit(h.get('terminal'), 'keyup', { code }); await flush(); assertSteeringCentered(h);
+    const count = h.actions().length;
+    h.emit(input, 'keydown', { code, repeat: true }); inputRange(h, input.id, 92); h.emit(input, 'change'); h.interval(100); await flush();
+    assertSteeringCentered(h); assert.equal(h.actions().length, count);
+    h.emit(input, 'keydown', { code }); inputRange(h, input.id, -26); await flush();
+    h.emit(input, 'blur'); await flush(); assertSteeringCentered(h); assert.equal(h.app.controls.steeringKeys.size, 0); h.dispose();
+  });
+});
+
+test('wheel range keys spring back on keyup without releasing a held pedal', async (t) => {
+  for (const [code, value] of [['ArrowUp', .05], ['ArrowDown', -.05], ['ArrowLeft', -.05], ['ArrowRight', .05], ['Home', 0], ['End', 1], ['PageUp', .1], ['PageDown', -.1]]) await t.test(code, async () => {
+    const h = await dashboard(); h.mode('racing'); await flush(); setRange(h, 'pedal-throttle', 35); await flush(); const wheel = h.get('racing-wheel');
+    const down = h.emit(wheel, 'keydown', { code }); await flush(); assert.equal(down.defaultPrevented, true);
+    assert.equal(h.app.controls.racing.steering, value); assert.equal(h.actions().at(-1).body.throttle, .35);
+    h.emit(h.window, 'keyup', { code }); await flush(); assertSteeringCentered(h);
+    assert.equal(h.actions().at(-1).body.steering, 0); assert.equal(h.actions().at(-1).body.throttle, .35);
+    const count = h.actions().length;
+    h.emit(wheel, 'keydown', { code, repeat: true }); await flush(); assertSteeringCentered(h); assert.equal(h.actions().length, count);
+    h.emit(wheel, 'keydown', { code: 'End' }); await flush(); h.emit(wheel, 'blur'); await flush(); assertSteeringCentered(h);
+    h.dispose();
+  });
+});
+
+test('independent steering pointers preserve the other held control until its final source releases', async () => {
+  const h = await dashboard(); h.mode('racing'); await flush(); const slider = h.get('racing-steering'); const wheel = h.get('racing-wheel');
+  setRange(h, slider.id, -43);
+  h.emit(wheel, 'pointerdown', { pointerId: 9, clientX: 100, clientY: 0 });
+  h.emit(wheel, 'pointermove', { pointerId: 9, clientX: 200, clientY: 100 }); await flush();
+  const wheelValue = h.app.controls.racing.steering; assert.ok(wheelValue > 0);
+  h.emit(slider, 'pointerup', { pointerId: 110 }); await flush(); assert.equal(h.app.controls.racing.steering, wheelValue);
+  h.emit(wheel, 'blur'); await flush(); assert.equal(h.app.controls.racing.steering, wheelValue);
+  h.emit(h.window, 'pointerup', { pointerId: 9 }); await flush(); assertSteeringCentered(h);
+  h.emit(wheel, 'pointerdown', { pointerId: 9, clientX: 100, clientY: 0 });
+  h.emit(wheel, 'pointermove', { pointerId: 9, clientX: 200, clientY: 100 });
+  setRange(h, slider.id, -30); h.emit(slider, 'pointerdown', { pointerId: 111 }); await flush();
+  h.emit(wheel, 'pointerup', { pointerId: 9 }); await flush(); assert.equal(h.app.controls.racing.steering, -.3);
+  h.emit(slider, 'pointerup', { pointerId: 110 }); await flush(); assert.equal(h.app.controls.racing.steering, -.3);
+  h.emit(h.window, 'pointerup', { pointerId: 111 }); await flush(); assertSteeringCentered(h); h.dispose();
+});
+
+test('all steering sources clear on lifecycle stops and late native input cannot resume steering', async (t) => {
+  const scenarios = [
+    ['Space', (h) => h.emit(h.get('racing-steering'), 'keydown', { code: 'Space' })],
+    ['blur', (h) => h.emit(h.window, 'blur')],
+    ['mode', (h) => h.mode('keyboard')],
+    ['terminal', (h) => { h.get('terminal').value = 'two'; h.emit(h.get('terminal'), 'change'); }],
+    ['hidden', (h) => { h.document.hidden = true; h.emit(h.document, 'visibilitychange'); }],
+    ['pagehide', (h) => h.emit(h.window, 'pagehide')],
+  ];
+  for (const [name, stop] of scenarios) await t.test(name, async () => {
+    const h = await dashboard(); h.mode('racing'); await flush(); const input = h.get('racing-steering'); const wheel = h.get('racing-wheel');
+    setRange(h, input.id, -55); h.emit(wheel, 'keydown', { code: 'ArrowRight' }); await flush();
+    const count = h.actions().length; stop(h); await flush(); assertSteeringCentered(h);
+    assert.equal(h.app.controls.steeringPointers.size, 0); assert.equal(h.app.controls.steeringKeys.size, 0); assert.equal(h.app.controls.steeringValues.size, 0);
+    h.document.hidden = false; h.emit(h.window, 'focus'); h.emit(h.window, 'pageshow'); h.mode('racing'); await flush();
+    inputRange(h, input.id, 88); h.emit(input, 'change'); h.emit(h.window, 'pointerup', { pointerId: 110 });
+    h.emit(input, 'keydown', { code: 'End', repeat: true }); inputRange(h, input.id, 100);
+    h.emit(wheel, 'keydown', { code: 'ArrowRight', repeat: true }); h.emit(wheel, 'pointermove', { pointerId: 9, clientX: 200, clientY: 100 });
+    h.interval(100); await flush(); assertSteeringCentered(h); assert.equal(h.actions().length, count); h.dispose();
+  });
+});
+
+test('steering released during cookie recovery is never replayed and other held input remains current', async (t) => {
+  for (const keepPedal of [false, true]) await t.test(`pedal=${keepPedal}`, async () => {
+    const h = await dashboard(); h.mode('racing'); await flush(); const releases = h.releases().length;
+    const recovery = deferred(); let attempts = 0;
+    h.state.handler = (request) => {
+      if (request.url === '/dashboard-session') return recovery.promise;
+      if (request.url.endsWith('/actions')) return ++attempts === 1 ? { ok: false, status: 401 } : ok();
+    };
+    setRange(h, 'racing-steering', 47); await flush();
+    if (keepPedal) setRange(h, 'pedal-throttle', 28);
+    h.emit(h.window, 'pointerup', { pointerId: 110 }); inputRange(h, 'racing-steering', 91); await flush();
+    recovery.resolve(ok()); await flush(); assertSteeringCentered(h);
+    if (keepPedal) {
+      assert.equal(h.actions().length, 2); assert.equal(h.actions().at(-1).body.steering, 0); assert.equal(h.actions().at(-1).body.throttle, .28);
+    } else {
+      assert.equal(h.actions().length, 1); assert.equal(h.releases().length, releases + 1);
+    }
+    h.dispose();
+  });
+});
+
+test('steering failures clear all sources and reject the still-held native drag', async () => {
+  const h = await dashboard(); h.mode('racing'); await flush(); const first = deferred();
+  h.state.handler = (request) => request.url.endsWith('/actions') ? first.promise : undefined;
+  setRange(h, 'racing-steering', 55); await flush(); setRange(h, 'racing-steering', 70); setRange(h, 'pedal-throttle', 48);
+  first.resolve({ ok: false, status: 502, json: async () => ({ error: 'steering failure' }) }); await flush();
+  assertSteeringCentered(h); assert.equal(h.app.controls.steeringPointers.size, 0); assert.equal(h.app.controls.steeringKeys.size, 0);
+  inputRange(h, 'racing-steering', 91); h.emit(h.get('racing-steering'), 'change'); h.emit(h.window, 'pointerup', { pointerId: 110 }); h.interval(100); await flush();
+  assertSteeringCentered(h); assert.equal(h.actions().length, 1); assert.equal(h.get('pedal-throttle').value, '0'); h.dispose();
+});
+
+test('steering ignores non-left presses and modified keys without changing the keyboard preset', async () => {
+  const h = await dashboard(); h.mode('racing'); await flush(); const input = h.get('racing-steering'); const count = h.actions().length;
+  for (const button of [1, 2]) {
+    h.emit(input, 'pointerdown', { pointerId: 110, button }); inputRange(h, input.id, 85); await flush(); assertSteeringCentered(h);
+  }
+  h.emit(input, 'keydown', { code: 'End', ctrlKey: true }); inputRange(h, input.id, 100); await flush(); assertSteeringCentered(h);
+  assert.equal(h.actions().length, count); h.mode('keyboard'); setRange(h, 'steering-level', 41); await flush();
+  assert.equal(h.get('steering-level').value, '41'); assert.equal(h.get('steering-value').textContent, '41%'); h.dispose();
+});
+
+test('a released key repeat cannot change a newly held steering or pedal pointer through native range behavior', async (t) => {
+  for (const id of ['racing-steering', 'pedal-throttle', 'pedal-brake', 'pedal-clutch']) await t.test(id, async () => {
+    const h = await dashboard(); h.mode('racing'); await flush(); const input = h.get(id);
+    h.emit(input, 'keydown', { code: 'End' }); inputRange(h, id, 100); await flush();
+    h.emit(input, 'keydown', { code: 'Space' }); await flush(); assert.equal(input.value, '0');
+    setRange(h, id, 23); await flush(); const count = h.actions().length;
+    const stale = h.emit(input, 'keydown', { code: 'End', repeat: true });
+    assert.equal(stale.defaultPrevented, true, 'an ignored old repeat must not trigger a native range input');
+    if (!stale.defaultPrevented) inputRange(h, id, 100);
+    await flush(); assert.equal(input.value, '23'); assert.equal(h.actions().length, count);
+    h.emit(h.window, 'keyup', { code: 'End' }); await flush(); assert.equal(input.value, '23', 'old keyup preserves the new pointer');
+    const pointerId = id === 'racing-steering' ? 110 : pedalPointer(id.slice(6));
+    h.emit(h.window, 'pointerup', { pointerId }); await flush(); assert.equal(input.value, '0');
+    if (id === 'racing-steering') assertSteeringCentered(h);
+    h.dispose();
+  });
+});
+
+test('racing analog axes compose exact strengths while held, renew, shift and reset together', async () => {
   const h = await dashboard(); h.mode('racing'); await flush();
   setRange(h, 'racing-steering', -43); setRange(h, 'pedal-throttle', 28); setRange(h, 'pedal-brake', 17); await flush();
   assert.deepEqual(h.actions().at(-1).body, { steering: -.43, throttle: .28, brake: .17, buttons: [], duration_ms: 250 });
@@ -876,4 +1202,144 @@ test('ended video tracks schedule a new session rather than freezing on the last
   const h = await dashboard(); enableVideo(h); h.app.syncVideo(); await flush();
   const peer = h.peers[0]; h.emit(peer.track, 'ended'); h.advance(1500); await flush();
   assert.equal(peer.closed, true); assert.equal(h.peers.length, 2); h.dispose();
+});
+
+const perceptionResult = (updates = {}) => ({
+  terminal_id: 'one', session_id: 'perception-one', status: 'ready', received_at: 100,
+  age_ms: 0, ttl_ms: 2000, image: { width: 1280, height: 720 }, frame: { sequence: 1 },
+  road: { polygon: [[.3, .65], [.45, .45], [.65, .45], [.8, .65]], centerline: [[.55, .65], [.6, .45]], confidence: .92 },
+  prediction: { steering: -.4, confidence: .81, source: 'model' }, model: { id: 'qa', label: '<b>My model</b>' }, inference_ms: 21,
+  ...updates,
+});
+async function perceptionPage(handler = () => ok(perceptionResult())) {
+  const h = await dashboard();
+  h.state.terminals[0].session_id = 'perception-one'; h.state.terminals[1].session_id = 'perception-two';
+  h.state.handler = request => request.url.endsWith('/perception') ? handler(request) : undefined;
+  h.app.renderVideo({ kind: 'playing' }); await flush();
+  return h;
+}
+
+test('perception renders uploaded geometry and prediction using GET without driving actions', async () => {
+  const h = await perceptionPage();
+  assert.equal(h.get('perception-road').hidden, false);
+  assert.equal(h.get('perception-road').getAttribute('points'), '300,650 450,450 650,450 800,650');
+  assert.match(h.get('perception-direction').textContent, /左转 40%/);
+  assert.equal(h.get('perception-hud').title, '<b>My model</b>');
+  assert.equal(h.get('perception-demo-badge').hidden, true);
+  assert.equal(h.actions().length, 0); assert.equal(h.releases().length, 0);
+  assert.equal(h.requestLog.filter(r => r.url.endsWith('/perception')).every(r => !r.options.method || r.options.method === 'GET'), true);
+  h.dispose();
+});
+
+test('prediction arrow follows predicted steering independently of the road centerline', async () => {
+  const h = await perceptionPage();
+  const arrow = h.get('perception-direction-line').getAttribute('points').split(' ').map(p => p.split(',').map(Number));
+  assert.ok(arrow.at(-1)[0] < arrow[0][0], 'negative prediction points left even if road centerline points right');
+  assert.equal(h.get('perception-centerline'), null); h.dispose();
+});
+
+test('perception layers and local demo never publish placeholder data or commands', async () => {
+  const h = await dashboard();
+  h.emit(h.get('overlay-demo'), 'click'); assert.equal(h.get('perception-demo-badge').hidden, false);
+  assert.equal(h.get('perception-overlay').hidden, false); assert.match(h.get('perception-source').textContent, /演示数据/);
+  const requests = h.requestLog.length; h.advance(3000); await flush(); assert.equal(h.requestLog.length, requests);
+  h.get('overlay-road').checked = false; h.emit(h.get('overlay-road'), 'change');
+  assert.equal(h.get('perception-road').hidden, true); assert.equal(h.get('perception-direction-line').hidden, false);
+  h.get('overlay-direction').checked = false; h.emit(h.get('overlay-direction'), 'change');
+  assert.equal(h.get('perception-overlay').hidden, true); assert.equal(h.get('perception-hud').hidden, true);
+  assert.equal(h.actions().length, 0); assert.equal(h.releases().length, 0); h.dispose();
+});
+
+test('perception expires even when a repeated poll claims the same upload is new', async () => {
+  const h = await perceptionPage();
+  h.advance(1500); await flush(); h.advance(501); await flush();
+  assert.equal(h.get('perception-overlay').hidden, true); assert.match(h.get('perception-status').textContent, /过期/); h.dispose();
+});
+
+test('perception rejects invalid geometry, wrong sessions and older result versions', async () => {
+  const h = await perceptionPage(); const overlay = h.app.perception;
+  overlay.applyResult(perceptionResult({ received_at: 99, prediction: { steering: 1, confidence: 1, source: 'model' } }));
+  assert.match(h.get('perception-direction').textContent, /左转/);
+  overlay.applyResult(perceptionResult({ session_id: 'old' })); assert.equal(h.get('perception-overlay').hidden, true);
+  overlay.applyResult(perceptionResult({ received_at: 101, road: { polygon: [[Infinity, 0]], centerline: [], confidence: 2 } }));
+  assert.equal(h.get('perception-overlay').hidden, true); assert.match(h.get('perception-status').textContent, /无效/);
+  h.dispose();
+});
+
+test('late perception replies cannot restore graphics after video disconnection', async () => {
+  const pending = deferred(); const h = await perceptionPage(() => pending.promise);
+  const request = h.requestLog.find(r => r.url.endsWith('/perception')); assert.ok(request);
+  h.app.renderVideo({ kind: 'reconnecting' }); assert.equal(request.options.signal.aborted, true);
+  pending.resolve(ok(perceptionResult())); await flush();
+  assert.equal(h.get('perception-overlay').hidden, true); assert.equal(h.get('perception-hud').hidden, true); h.dispose();
+});
+
+test('real predictions replace local demo and no-road predictions can render alone', async () => {
+  const pending = deferred(); const h = await perceptionPage(() => pending.promise);
+  h.app.perception.setDemo(true); assert.equal(h.get('perception-demo-badge').hidden, false);
+  pending.resolve(ok(perceptionResult())); await flush();
+  assert.equal(h.app.perception.demo, false); assert.equal(h.get('perception-demo-badge').hidden, true);
+  h.app.perception.applyResult(perceptionResult({ received_at: 101, status: 'no_road', road: null }));
+  assert.equal(h.get('perception-road').hidden, true); assert.equal(h.get('perception-direction-line').hidden, false);
+  assert.match(h.get('perception-direction').textContent, /左转/); h.dispose();
+});
+
+test('perception fits the video image inside vertical letterboxing and rejects wrong aspect ratios', async () => {
+  const h = await perceptionPage(); const overlay = h.app.perception;
+  h.get('frame').videoWidth = 1280; h.get('frame').videoHeight = 720;
+  overlay.renderCurrent(); assert.equal(h.get('perception-overlay').style.getPropertyValue('width'), '200px');
+  assert.equal(h.get('perception-overlay').style.getPropertyValue('height'), '112.5px');
+  assert.equal(h.get('perception-overlay').style.getPropertyValue('top'), '43.75px');
+  overlay.applyResult(perceptionResult({ received_at: 102, image: { width: 640, height: 480 } }));
+  assert.equal(h.get('perception-overlay').hidden, true); assert.match(h.get('perception-status').textContent, /比例/); h.dispose();
+});
+
+test('slow perception responses subtract request time before drawing their result', async () => {
+  const pending = deferred(); const h = await perceptionPage(() => pending.promise);
+  h.advance(2100); pending.resolve(ok(perceptionResult())); await flush();
+  assert.equal(h.get('perception-overlay').hidden, true); assert.match(h.get('perception-status').textContent, /过期/); h.dispose();
+});
+
+test('replacing geometry with a no-road status cancels the old expiry message', async () => {
+  const h = await perceptionPage();
+  h.app.perception.applyResult(perceptionResult({ received_at: 101, status: 'no_road', road: null, prediction: null }));
+  h.app.perception.api = { json: async () => perceptionResult({ received_at: 101, status: 'no_road', road: null, prediction: null }) };
+  h.advance(2200); await flush();
+  assert.match(h.get('perception-status').textContent, /未识别到道路/); assert.equal(h.get('perception-overlay').hidden, true); h.dispose();
+});
+
+test('perception keeps displaying and polling when the visible browser loses window focus', async () => {
+  let version = 100;
+  const h = await perceptionPage(() => ok(perceptionResult({ received_at: version++ })));
+  const requests = () => h.requestLog.filter(r => r.url.endsWith('/perception')).length;
+  const before = requests();
+  h.state.focused = false; h.emit(h.window, 'blur'); await flush();
+  assert.equal(h.get('perception-overlay').hidden, false); assert.equal(h.get('perception-hud').hidden, false);
+  h.advance(500); await flush(); assert.ok(requests() > before, 'visible overlay continues to fetch while console has focus');
+  assert.equal(h.get('perception-road').hidden, false);
+  h.document.hidden = true; h.emit(h.document, 'visibilitychange'); await flush();
+  assert.equal(h.get('perception-overlay').hidden, true); assert.equal(h.get('perception-hud').hidden, true);
+  const paused = requests(); h.advance(2500); await flush(); assert.equal(requests(), paused); h.dispose();
+});
+
+test('perception can start while the browser is visible but already unfocused', async () => {
+  const h = await dashboard();
+  h.state.focused = false;
+  h.app.perception.destroy();
+  h.state.terminals[0].session_id = 'perception-one';
+  h.state.handler = request => request.url.endsWith('/perception') ? ok(perceptionResult()) : undefined;
+  h.app.perception = new h.window.AutoDriver.PerceptionOverlay({ api: h.app.api, video: h.get('frame'), stage: h.get('video-stage'),
+    getContext: () => ({ terminalId: 'one', sessionId: 'perception-one', playing: true }),
+  });
+  await flush(); assert.equal(h.get('perception-road').hidden, false); assert.equal(h.get('perception-hud').hidden, false);
+  h.dispose();
+});
+
+test('local perception demo keeps cycling without window focus and stops on pagehide', async () => {
+  const h = await dashboard();
+  h.app.perception.setDemo(true); h.state.focused = false; h.emit(h.window, 'blur'); await flush();
+  assert.equal(h.get('perception-overlay').hidden, false); assert.equal(h.get('perception-demo-badge').hidden, false);
+  h.advance(3000); await flush(); assert.match(h.get('perception-direction').textContent, /右转/);
+  h.emit(h.window, 'pagehide'); await flush(); assert.equal(h.get('perception-overlay').hidden, true);
+  h.dispose();
 });

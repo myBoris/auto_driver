@@ -23,6 +23,19 @@ async def terminal(request):
     return web.json_response(session_for(request).describe())
 
 
+async def control(request):
+    after = None
+    if "after" in request.query:
+        after = int(request.query["after"])
+        if after < 0:
+            raise APIError(400, "after must be nonnegative")
+    timeout = number(float(request.query.get("timeout", "0")), "timeout", 0, 20)
+    value = await session_for(request).get_control(
+        after=after, timeout=timeout, session_id=request.query.get("session_id"),
+    )
+    return web.json_response(value, headers={"Cache-Control": "no-store"})
+
+
 async def frame(request):
     after = None
     if "after" in request.query:

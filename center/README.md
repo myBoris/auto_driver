@@ -65,12 +65,15 @@ Docker 中的 ICE host 候选通常是容器网桥地址。中心将其改为浏
 | GET | `/dashboard-session` | 自动建立或恢复浏览器会话 |
 | GET | `/api/terminals` | 所有已知终端及在线状态 |
 | GET | `/api/terminals/{id}` | 终端采集、手柄和连接状态 |
+| GET | `/api/terminals/{id}/control` | 终端已确认的驾驶输入、执行状态、版本和剩余有效期 |
 | GET | `/api/terminals/{id}/frame` | 最新 JPEG，附帧序号和时间戳 |
 | GET | `/api/terminals/{id}/frame?after=序号&timeout=5` | 等待更新帧，最多 30 秒 |
 | GET | `/api/terminals/{id}/stream` | MJPEG 连续画面 |
 | GET | `/api/terminals/{id}/video` | H.264 视频可用性、状态说明和同源 WHEP 地址 |
 | POST | `/api/terminals/{id}/video/whep` | 使用 `application/sdp` 协商 WebRTC，返回 201 与本地 Location |
 | DELETE | `/api/terminals/{id}/video/sessions/{session}` | 回收本地会话及对应上游媒体会话 |
+| GET | `/api/terminals/{id}/perception` | 最新道路检测与 AI 方向显示结果及有效期 |
+| POST | `/api/terminals/{id}/perception` | 发布道路轮廓、中心线和预测方向，仅供页面显示 |
 | POST | `/api/terminals/{id}/actions` | 下发完整手柄状态，等待终端执行确认 |
 | POST | `/api/terminals/{id}/release` | 立即释放全部输入，取消此前排队和等待中的操作 |
 | POST | `/api/terminals/{id}/step` | 执行动作并等待该动作持续时间结束后采集的图像 |
@@ -82,6 +85,10 @@ Docker 中的 ICE host 候选通常是容器网桥地址。中心将其改为浏
 ```
 
 `steering` 范围 -1～1，负数向左；油门、刹车为 0～1。`duration_ms` 为 0～5000 的整数，默认 200，到期终端自动回中；0 表示立刻释放。每条动作替换全部输入，省略字段归零。支持按钮 `A B X Y LB RB BACK START GUIDE LTHUMB RTHUMB DPAD_UP DPAD_DOWN DPAD_LEFT DPAD_RIGHT`。
+
+通过 `actions`、`step` 或页面执行的动作，在终端确认后都会立即同步到管理页，显示转向、油门、刹车、离合和按钮状态；动作到期或释放后显示归零。键盘、手柄、赛车模拟三个模式均可查看，键盘的力度预设保持独立。只查看状态、窗口失焦或切换控制模式不会发送控制命令；点击“全部释放”或在页面有焦点时按 Space 可以主动释放 API 输入。
+
+`GET /api/terminals/{id}/control` 返回 `terminal_id`、`session_id`、`revision`、`connected`、`status`、`state`、`command_id`、`applied_at` 和 `remaining_ms`。`state` 与完整动作格式一致；`status` 为 `idle`、`active`、`released`、`expired`、`unconfirmed` 或 `disconnected`。可传 `after=上次revision&session_id=当前会话&timeout=20` 等待状态变化，最多等待 20 秒；客户端请求超时应长于此值。终端重连后重新读取会话和版本。该接口只读取状态，不发送或续期驾驶动作；剩余有效期从中心收到执行确认时按单调时钟估算。
 
 成功返回 `terminal_id`、`command_id` 和 `ack`。`ack.ok=true` 表示虚拟手柄调用已成功，不能表示游戏物理结果。终端拒绝执行返回 502；确认或等帧超时返回 504；离线或被释放操作取消返回 409；未知终端返回 404；无可用新鲜画面返回 503；错误请求返回 400。
 
@@ -105,10 +112,12 @@ configuration/settings.py     配置默认值、环境变量和校验
 api/middleware.py              Cookie/Bearer/Origin 与统一错误响应
 api/v1/terminals.py            终端、动作、训练观察 HTTP 适配
 api/v1/media.py                WHEP、会话删除和内部媒体认证适配
+api/v1/perception.py           道路与预测显示结果发布、读取适配
 api/terminal_socket.py         终端 WebSocket 网络读写
 services/terminals.py          注册替换、完整动作与 step 业务
 services/terminal_session.py   最新帧、匹配确认、超时及释放取消
 services/media.py              发布授权、视频状态、会话归属和回收
+services/perception.py         结果校验、会话隔离、排序与过期清除
 domain/                       帧模型、动作校验、媒体路径和 ICE 规则
 infrastructure/               UDP、MediaMTX HTTP 访问和资源生命周期
 static/                       页面结构、样式、API、播放器与控制模块
@@ -163,11 +172,13 @@ uv run python -m unittest discover -s tests -v
 
 管理页将在线终端数、终端切换、连接状态、实测播放 FPS、采集目标 FPS 和控制确认整合到紧凑状态区。播放帧率仍按浏览器实际呈现或解码计数测量，采集目标值单独标注。
 
+实时视频支持叠加道路区域和 AI 预测方向，两个图层可分别开关；“演示”按钮可查看明确标记的本地示意数据。模型训练完成后，将结果发布到 `POST /api/terminals/{terminal_id}/perception` 即可显示，无需修改播放器。结果 2 秒未更新即清除；该通道只用于显示。请求格式、坐标和 Python 接入见 [道路检测与 AI 方向显示接口](docs/perception.md)。
+
 驾驶控制提供三种可独立操作的模式：
 
 - **键盘**：勾选启用键盘后，使用 WASD / 方向键驾驶，C 离合，Q 降挡、E 升挡；“按键力度”可分别设置 W / S / C 按住时的力度，转向幅度单独设置，也可按住屏幕按钮操作。普通键盘不检测按压力。
 - **手柄**：使用屏幕上的方向和 Xbox 按钮，或连接浏览器可识别的标准映射手柄。实体手柄左摇杆横轴转向，RT 油门、LT 刹车、LB 离合，扳机按钮旁同步显示力度；屏幕 RT / LT 按住踩满，松开释放。浏览器需支持 Gamepad API，通常需使用 HTTPS 或 localhost，并先按一下实体手柄按键使其被识别。非标准映射设备请使用屏幕按钮。
-- **赛车模拟**：拖动方向盘转向，松开方向盘自动回正；也可使用转向滑块保持角度，并通过三只踏板控制离合、刹车和油门。换挡发送 B（升挡）/ X（降挡），需在游戏中启用手动挡并匹配按键设置；页面不读取游戏实际挡位。
+- **赛车模拟**：拖动方向盘或转向滑块转向，松手或松键自动回正；转向力度从中心向对应一侧填充，并通过三只踏板控制离合、刹车和油门。换挡发送 B（升挡）/ X（降挡），需在游戏中启用手动挡并匹配按键设置；页面不读取游戏实际挡位。
 
 踏板只在赛车模拟模式显示和启用；键盘使用按键力度设置，手柄使用扳机输入。按住赛车踏板并向下拖动，可调节 0～100% 力度，松开立即归零；方向键微调、End 踩满，松键也归零。Home 或每只踏板的 ↺ 可释放该踏板；触摸取消、拖出后松开和失焦也会释放。多点触摸可同时控制不同踏板，松开其中一只不影响其他仍按住的踏板。Space 或“全部释放”清除所有来源。
 

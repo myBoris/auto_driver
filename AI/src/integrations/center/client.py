@@ -1,4 +1,4 @@
-"""独立中心客户端：严格解析观察和动作确认，保持 POST 的执行结果语义。
+"""独立中心客户端：严格解析观察、感知结果和动作确认，保持 POST 的结果语义。
 
 网络失败可能发生在终端已执行动作之后，因此本适配器不自动重试 POST。
 训练策略应根据异常决定停止、观察或显式释放，不能假设断线等于未执行。
@@ -35,7 +35,7 @@ class CenterTransportError(RuntimeError):
 
     def __init__(self, method: str) -> None:
         self.may_have_executed = method != "GET"
-        suffix = "; the action may already have executed; POST was not retried" if self.may_have_executed else ""
+        suffix = "; the request may already have been processed; POST was not retried" if self.may_have_executed else ""
         super().__init__(f"center connection failed or timed out{suffix}")
 
 
@@ -117,6 +117,74 @@ class CenterClient:
         if data["terminal_id"] != terminal_id:
             raise CenterProtocolError("terminal metadata does not match requested terminal")
         return data
+
+    @staticmethod
+    def _perception(data: dict[str, Any], terminal_id: str,
+                    expected_session: str | None = None) -> dict[str, Any]:
+        """校验结果所属终端、会话和新鲜度元数据；不将感知值转换成驾驶动作。"""
+        if (data.get("terminal_id") != terminal_id
+                or not isinstance(data.get("session_id"), str) or not data["session_id"]
+                or (expected_session is not None and data["session_id"] != expected_session)
+                or data.get("status") not in ("ready", "no_road", "waiting", "stale", "unavailable")):
+            raise CenterProtocolError("perception does not match requested terminal/session or status")
+        try:
+            finite_number(data.get("ttl_ms"), "ttl_ms", 1, 60000)
+            if data.get("age_ms") is not None:
+                finite_number(data["age_ms"], "age_ms", 0, 1e15)
+            if data.get("received_at") is not None:
+                timestamp(data["received_at"], "received_at")
+            if data.get("inference_ms") is not None:
+                finite_number(data["inference_ms"], "inference_ms", 0, 60000)
+            frame = data.get("frame")
+            if frame is not None:
+                if not isinstance(frame, dict):
+                    raise ValueError("frame must be an object")
+                sequence = frame.get("sequence")
+                if sequence is not None and (isinstance(sequence, bool) or not isinstance(sequence, int)
+                                             or not 1 <= sequence <= 2**53 - 1):
+                    raise ValueError("invalid frame sequence")
+                if frame.get("captured_at") is not None:
+                    timestamp(frame["captured_at"], "captured_at")
+            road, prediction = data.get("road"), data.get("prediction")
+            if road is not None and not isinstance(road, dict):
+                raise ValueError("road must be an object or null")
+            if prediction is not None:
+                if (not isinstance(prediction, dict)
+                        or prediction.get("source") not in {"model", "road_geometry", "external", "demo"}):
+                    raise ValueError("invalid prediction source")
+                finite_number(prediction.get("steering"), "steering", -1, 1)
+                finite_number(prediction.get("confidence"), "confidence", 0, 1)
+            if data["status"] in {"waiting", "stale", "unavailable"} and (road is not None or prediction is not None):
+                raise ValueError("inactive perception must not retain road or prediction")
+            if data["status"] in {"ready", "no_road"}:
+                image, model = data.get("image"), data.get("model")
+                if not isinstance(image, dict) or not isinstance(model, dict) or not isinstance(model.get("id"), str) or not model["id"]:
+                    raise ValueError("missing perception image/model metadata")
+                for name in ("width", "height"):
+                    value = image.get(name)
+                    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 16384:
+                        raise ValueError("invalid image size")
+                if data.get("received_at") is None or data.get("age_ms") is None:
+                    raise ValueError("published perception requires freshness metadata")
+                if data["status"] == "ready" and road is None and prediction is None:
+                    raise ValueError("ready perception requires road or prediction")
+                if data["status"] == "no_road" and road is not None:
+                    raise ValueError("no_road perception must not contain road geometry")
+        except (TypeError, ValueError) as exc:
+            raise CenterProtocolError("invalid perception response metadata") from exc
+        return data
+
+    async def get_perception(self, terminal_id: str) -> dict[str, Any]:
+        """读取最新道路/方向叠加结果，不取图、不发送游戏输入或释放操作。"""
+        data = await self._json("GET", self._path(terminal_id) + "/perception")
+        return self._perception(data, terminal_id)
+
+    async def publish_perception(self, terminal_id: str, result: dict[str, Any]) -> dict[str, Any]:
+        """发布当前会话的可视化数据；网络异常不自动重放 POST。"""
+        if not isinstance(result, dict) or not isinstance(result.get("session_id"), str) or not result["session_id"]:
+            raise ValueError("perception result requires the current terminal session_id")
+        data = await self._json("POST", self._path(terminal_id) + "/perception", json=result)
+        return self._perception(data, terminal_id, result["session_id"])
 
     async def observe(self, terminal_id: str, after: int | None = None, timeout: float = 5) -> Observation:
         timeout = finite_number(timeout, "timeout", 0.1, 30)

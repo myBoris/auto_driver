@@ -58,6 +58,14 @@ class CenterClient:
     async def terminals(self) -> list[dict]:
         return (await self._json("GET", "/api/terminals"))["terminals"]
 
+    async def perception(self, terminal_id: str) -> dict:
+        """读取道路检测和预测显示结果，不操作终端手柄。"""
+        return await self._json("GET", self._path(terminal_id) + "/perception")
+
+    async def publish_perception(self, terminal_id: str, result: dict) -> dict:
+        """发布模型的可视化结果；result.session_id 必须匹配当前终端会话。"""
+        return await self._json("POST", self._path(terminal_id) + "/perception", json=result)
+
     async def action(self, terminal_id: str, **action) -> dict:
         return await self._json("POST", self._path(terminal_id) + "/actions", json=action)
 

@@ -1,4 +1,4 @@
-/* 驾驶控制模块：键盘、手柄和赛车模拟使用同一动作队列，切换或失焦时立即释放。 */
+/* 驾驶控制模块：本地输入使用同一动作队列，终端执行状态仅用于展示。 */
 (() => {
   'use strict';
   const namespace = window.AutoDriver = window.AutoDriver || {};
@@ -20,10 +20,12 @@
       this.racing = neutral(); this.gamepadState = neutral();
       this.manualPedals = releasedPedals();
       this.pedalPointers = new Map(); this.pedalKeys = new Map();
+      this.steeringPointers = new Map(); this.steeringKeys = new Map(); this.steeringValues = new Map(); this.steeringSerial = 0;
       this.gamepadBlocked = true; this.gamepadIndex = null; this.gamepadId = null;
       this.focused = typeof document.hasFocus !== 'function' || document.hasFocus();
       this.wheelPointer = null; this.inputEpoch = 0;
       this.releases = []; this.pendingAction = null; this.running = false;
+      this.observedState = null; this.observedSuppression = null;
       this.buttons = [...document.querySelectorAll('[data-control]')];
       this.tabs = [...document.querySelectorAll('[data-mode]')];
       this.panels = [...document.querySelectorAll('[data-mode-panel]')];
@@ -39,15 +41,74 @@
     activeInput() { return this.held.size > 0 || (this.mode === 'racing' && (pedals.some((axis) => this.manualPedals[axis] > .001) || nonzero(this.racing))) || (this.mode === 'gamepad' && nonzero(this.gamepadState)); }
     buttonMode(button) { return button.dataset.inputMode || 'keyboard'; }
 
+    observationKey(snapshot) { return `${snapshot.terminal_id}\u0000${snapshot.session_id}`; }
+
+    suppressObservedState() {
+      if (this.observedState) {
+        this.observedSuppression = { key: this.observationKey(this.observedState), revision: this.observedState.revision };
+        this.observedState = null;
+      }
+    }
+
+    localInputEngaged() {
+      return this.activeInput() || this.steeringPointers.size > 0 || this.steeringKeys.size > 0 || this.pedalPointers.size > 0 || this.pedalKeys.size > 0;
+    }
+
+    setObservedState(snapshot) {
+      if (!snapshot) { this.observedState = null; this.sync(); return; }
+      const key = this.observationKey(snapshot);
+      const revision = Number(snapshot.revision) || 0;
+      if (this.observedSuppression?.key === key && revision <= this.observedSuppression.revision) {
+        this.observedState = null; this.sync(); return;
+      }
+      const state = snapshot.state || neutral();
+      this.observedState = {
+        ...snapshot, revision,
+        state: { steering: clamp(state.steering, -1, 1), throttle: clamp(state.throttle, 0, 1), brake: clamp(state.brake, 0, 1), buttons: Array.isArray(state.buttons) ? [...state.buttons] : [] },
+      };
+      // 本地操作期间仍接收版本号，但不得在松手后恢复先前观察到的按下状态。
+      if (this.localInputEngaged()) this.suppressObservedState();
+      this.sync();
+    }
+
+    executionLabel(state) {
+      const steering = Math.round(state.steering * 100);
+      const parts = [steering ? `${steering < 0 ? '左' : '右'} ${Math.abs(steering)}%` : '居中', `油门 ${Math.round(state.throttle * 100)}%`, `刹车 ${Math.round(state.brake * 100)}%`];
+      if (state.buttons.includes('LB')) parts.push('离合 100%');
+      if (state.buttons.includes('X')) parts.push('降挡');
+      if (state.buttons.includes('B')) parts.push('升挡');
+      return parts.join(' · ');
+    }
+
     sync() {
-      const active = new Set([...this.held.values(), ...(this.mode === 'gamepad' ? this.gamepadState.buttons : [])]);
+      const local = this.localInputEngaged();
+      const observation = !local ? this.observedState : null;
+      const observed = observation ? (observation.status === 'active' && observation.connected !== false ? observation.state : neutral()) : null;
+      const active = new Set(observed ? observed.buttons : [...this.held.values(), ...(this.mode === 'gamepad' ? this.gamepadState.buttons : [])]);
+      if (observed) {
+        if (observed.steering < -.001) active.add('left');
+        if (observed.steering > .001) active.add('right');
+        if (observed.throttle > .001) active.add('throttle');
+        if (observed.brake > .001) active.add('brake');
+        if (observed.buttons.includes('LB')) active.add('clutch');
+      }
       const available = this.available();
-      const pedalState = this.mode === 'racing' ? this.pedalState() : releasedPedals();
-      const gamepadAction = this.mode === 'gamepad' ? this.actionState() : neutral();
+      const pedalState = observed ? { throttle: observed.throttle, brake: observed.brake, clutch: observed.buttons.includes('LB') ? 1 : 0 } : this.mode === 'racing' ? this.pedalState() : releasedPedals();
+      const gamepadAction = observed || (this.mode === 'gamepad' ? this.actionState() : neutral());
+      const racingSteering = observed ? observed.steering : this.racing.steering;
+      this.element('driving-controls')?.classList.toggle('observing-execution', Boolean(observation));
+      const execution = this.element('control-execution');
+      if (execution) {
+        execution.dataset.state = local ? 'local' : observation?.status || 'waiting';
+        const status = { idle: '输入已归零', released: '已释放', expired: '指令已到期', unconfirmed: '执行未确认', disconnected: '终端离线' }[observation?.status];
+        execution.textContent = local ? `本地操作：${this.executionLabel(this.actionState())}` : observation?.status === 'active' ? `终端执行：${this.executionLabel(observed)}` : `终端执行：${status || '等待状态'}`;
+        execution.title = execution.textContent;
+      }
       for (const button of this.buttons) {
         const selected = this.buttonMode(button) === this.mode;
         button.disabled = !available || !selected;
         button.classList.toggle('held', selected && active.has(button.dataset.control));
+        button.classList.toggle('observed', Boolean(observation) && selected && active.has(button.dataset.control));
         button.setAttribute('aria-pressed', String(selected && active.has(button.dataset.control)));
       }
       for (const tab of this.tabs) {
@@ -75,18 +136,23 @@
         this.text(`pedal-${axis}-value`, `${percent}%`);
       }
       for (const reset of this.pedalResets) reset.disabled = !available || this.mode !== 'racing' || !this.manualPedals[reset.dataset.pedalReset];
-      const steeringInput = this.element('racing-steering');
-      if (steeringInput) { steeringInput.disabled = !available || this.mode !== 'racing'; steeringInput.value = String(Math.round(this.racing.steering * 100)); }
-      const steeringPercent = Math.round(this.racing.steering * 100);
+      const steeringPercent = Math.round(racingSteering * 100);
       const steeringLabel = steeringPercent ? `${steeringPercent < 0 ? '左' : '右'} ${Math.abs(steeringPercent)}%` : '居中';
+      const steeringInput = this.element('racing-steering');
+      if (steeringInput) {
+        steeringInput.disabled = !available || this.mode !== 'racing'; steeringInput.value = String(steeringPercent);
+        steeringInput.style?.setProperty('--steering-fill-start', `${Math.min(50, 50 + steeringPercent / 2)}%`);
+        steeringInput.style?.setProperty('--steering-fill-end', `${Math.max(50, 50 + steeringPercent / 2)}%`);
+        steeringInput.setAttribute('aria-valuetext', steeringLabel);
+      }
       this.text('racing-steering-value', steeringLabel);
       const keyboard = this.element('keyboard');
       if (keyboard) keyboard.disabled = !available || this.mode !== 'keyboard';
       const wheel = this.element('racing-wheel');
       if (wheel) {
         wheel.disabled = !available || this.mode !== 'racing';
-        wheel.style?.setProperty('--wheel-angle', `${this.racing.steering * 135}deg`);
-        wheel.setAttribute('aria-valuenow', String(Math.round(this.racing.steering * 100)));
+        wheel.style?.setProperty('--wheel-angle', `${racingSteering * 135}deg`);
+        wheel.setAttribute('aria-valuenow', String(steeringPercent));
         wheel.setAttribute('aria-valuetext', steeringLabel);
         wheel.classList.toggle('held', this.wheelPointer !== null);
       }
@@ -168,10 +234,11 @@
 
     setHeld(source, control, mode = this.mode) {
       if (!this.available() || mode !== this.mode) return;
+      this.suppressObservedState();
       this.held.set(source, control); this.sync(); this.queueAction();
     }
 
-    inputChanged() { this.sync(); if (this.activeInput()) this.queueAction(); else this.queueRelease(); }
+    inputChanged() { this.suppressObservedState(); this.sync(); if (this.activeInput()) this.queueAction(); else this.queueRelease(); }
     clearHeld(source) { if (this.held.delete(source)) this.inputChanged(); }
 
     clearInput() {
@@ -179,10 +246,16 @@
       this.held.clear(); this.racing = neutral(); this.gamepadState = neutral(); this.pendingAction = null;
       this.manualPedals = releasedPedals();
       this.clearPedalSources();
+      this.clearSteeringSources();
       this.gamepadBlocked = true; this.wheelPointer = null;
     }
 
-    stop() { this.clearInput(); this.sync(); this.queueRelease(); }
+    stop(force = false) {
+      const release = force || this.activeInput() || Boolean(this.pendingAction);
+      if (release) this.suppressObservedState();
+      this.clearInput(); this.sync();
+      if (release) this.queueRelease();
+    }
 
     switchMode(mode) {
       if (!modes.includes(mode) || mode === this.mode) return;
@@ -229,9 +302,82 @@
       return changed;
     }
 
-    setRacingAxis(axis, value) {
+    setRacingAxis(axis, value, source = 'slider') {
       if (axis !== 'steering' || this.mode !== 'racing' || !this.available()) return;
-      this.racing.steering = clamp(value, -1, 1); this.inputChanged();
+      if (!this.steeringEngaged(source)) { this.sync(); return; }
+      this.steeringValues.set(source, { value: clamp(value, -1, 1), order: ++this.steeringSerial });
+      this.refreshSteering();
+    }
+
+    steeringElement(source) { return this.element(source === 'wheel' ? 'racing-wheel' : 'racing-steering'); }
+    steeringEngaged(source) { return [...this.steeringPointers.values(), ...this.steeringKeys.values()].includes(source); }
+
+    refreshSteering() {
+      const held = [...this.steeringValues].filter(([source]) => this.steeringEngaged(source)).sort((a, b) => b[1].order - a[1].order);
+      const value = held[0]?.[1].value || 0;
+      const changed = this.racing.steering !== value;
+      this.racing.steering = value;
+      if (changed) this.inputChanged(); else this.sync();
+    }
+
+    beginSteering(source) {
+      this.suppressObservedState();
+      if (!this.steeringEngaged(source)) this.steeringValues.set(source, { value: this.racing.steering, order: ++this.steeringSerial });
+    }
+
+    clearSteeringSources(source) {
+      const captured = [...this.steeringPointers].filter(([, name]) => !source || name === source);
+      for (const [id] of captured) this.steeringPointers.delete(id);
+      for (const [code, name] of this.steeringKeys) if (!source || name === source) this.steeringKeys.delete(code);
+      if (!source || source === 'wheel') this.wheelPointer = null;
+      for (const name of ['slider', 'wheel']) if (!source || name === source) this.steeringValues.delete(name);
+      for (const [id, name] of captured) {
+        const input = this.steeringElement(name);
+        if (input?.hasPointerCapture?.(id)) input.releasePointerCapture(id);
+      }
+    }
+
+    releaseSteeringPointer(event) {
+      const source = this.steeringPointers.get(event.pointerId);
+      if (!source) return;
+      this.steeringPointers.delete(event.pointerId);
+      if (source === 'wheel' && this.wheelPointer?.id === event.pointerId) this.wheelPointer = null;
+      if (!this.steeringEngaged(source)) this.steeringValues.delete(source);
+      this.refreshSteering();
+    }
+
+    blurSteering(source) {
+      for (const [code, name] of this.steeringKeys) if (name === source) this.steeringKeys.delete(code);
+      if (!this.steeringEngaged(source)) this.steeringValues.delete(source);
+      this.refreshSteering();
+    }
+
+    bindSteeringSlider() {
+      const input = this.element('racing-steering');
+      if (input) {
+        input.addEventListener('pointerdown', (event) => {
+          if (event.button !== 0 || this.mode !== 'racing' || !this.available()) return;
+          this.beginSteering('slider'); this.steeringPointers.set(event.pointerId, 'slider');
+          input.setPointerCapture(event.pointerId);
+        });
+        for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) input.addEventListener(name, (event) => this.releaseSteeringPointer(event));
+        input.addEventListener('keydown', (event) => {
+          if (!rangeKeys.includes(event.code) || event.altKey || event.ctrlKey || event.metaKey || this.mode !== 'racing' || !this.available()) return;
+          if (event.repeat && this.steeringKeys.get(event.code) !== 'slider') { event.preventDefault(); return; }
+          this.beginSteering('slider'); this.steeringKeys.set(event.code, 'slider');
+        });
+        input.addEventListener('input', () => this.setRacingAxis('steering', Number(input.value) / 100));
+        input.addEventListener('change', () => { if (!this.steeringEngaged('slider')) this.sync(); });
+        input.addEventListener('blur', () => this.blurSteering('slider'));
+      }
+      for (const name of ['pointerup', 'pointercancel']) window.addEventListener(name, (event) => this.releaseSteeringPointer(event));
+      window.addEventListener('keyup', (event) => {
+        const source = this.steeringKeys.get(event.code);
+        if (!source) return;
+        this.steeringKeys.delete(event.code);
+        if (!this.steeringEngaged(source)) this.steeringValues.delete(source);
+        this.refreshSteering();
+      });
     }
 
     setManualPedal(axis, value) {
@@ -274,13 +420,15 @@
         input.addEventListener('pointerdown', (event) => {
           if (event.button !== 0 || this.mode !== 'racing' || !this.available()) return;
           // 保留浏览器的原生拖动与焦点行为，捕获指针保证控件外松手也可释放。
+          this.suppressObservedState();
           this.pedalPointers.set(event.pointerId, axis);
           input.setPointerCapture(event.pointerId);
         });
         for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) input.addEventListener(name, (event) => this.releasePedalPointer(event));
         input.addEventListener('keydown', (event) => {
           if (!rangeKeys.includes(event.code) || event.altKey || event.ctrlKey || event.metaKey || this.mode !== 'racing' || !this.available()) return;
-          if (event.repeat && this.pedalKeys.get(event.code) !== axis) return;
+          if (event.repeat && this.pedalKeys.get(event.code) !== axis) { event.preventDefault(); return; }
+          this.suppressObservedState();
           this.pedalKeys.set(event.code, axis);
         });
         input.addEventListener('input', () => this.setManualPedal(axis, Number(input.value) / 100));
@@ -312,27 +460,31 @@
       wheel.addEventListener('pointerdown', (event) => {
         if (event.button !== 0 || this.mode !== 'racing' || !this.available() || this.wheelPointer) return;
         event.preventDefault(); wheel.setPointerCapture(event.pointerId);
+        this.beginSteering('wheel'); this.steeringPointers.set(event.pointerId, 'wheel');
         this.wheelPointer = { id: event.pointerId, angle: this.wheelAngle(event) }; this.sync();
       });
       wheel.addEventListener('pointermove', (event) => {
         if (this.wheelPointer?.id !== event.pointerId || this.mode !== 'racing' || !this.available()) return;
         event.preventDefault(); const angle = this.wheelAngle(event);
         const delta = ((angle - this.wheelPointer.angle + 540) % 360) - 180;
-        this.wheelPointer.angle = angle; this.setRacingAxis('steering', this.racing.steering + delta / 135);
+        this.wheelPointer.angle = angle; this.setRacingAxis('steering', (this.steeringValues.get('wheel')?.value || 0) + delta / 135, 'wheel');
       });
       const release = (event) => {
-        if (this.wheelPointer?.id !== event.pointerId) return;
-        this.wheelPointer = null; this.setRacingAxis('steering', 0);
+        this.releaseSteeringPointer(event);
       };
       for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) wheel.addEventListener(name, release);
       wheel.addEventListener('contextmenu', (event) => event.preventDefault());
       wheel.addEventListener('keydown', (event) => {
-        if (this.mode !== 'racing' || !this.available() || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.code)) return;
+        if (this.mode !== 'racing' || !this.available() || event.altKey || event.ctrlKey || event.metaKey || !rangeKeys.includes(event.code)) return;
+        if (event.repeat && this.steeringKeys.get(event.code) !== 'wheel') { event.preventDefault(); event.stopPropagation(); return; }
         event.preventDefault(); event.stopPropagation();
-        this.setRacingAxis('steering', event.code === 'Home' ? 0 : event.code === 'End' ? 1 : this.racing.steering + (event.code === 'ArrowLeft' ? -.05 : .05));
+        this.beginSteering('wheel'); this.steeringKeys.set(event.code, 'wheel');
+        const step = ['PageUp', 'PageDown'].includes(event.code) ? .1 : .05;
+        const direction = ['ArrowLeft', 'ArrowDown', 'PageDown'].includes(event.code) ? -1 : 1;
+        this.setRacingAxis('steering', event.code === 'Home' ? 0 : event.code === 'End' ? 1 : (this.steeringValues.get('wheel')?.value || 0) + direction * step, 'wheel');
       });
-      wheel.addEventListener('blur', () => { if (this.mode === 'racing' && this.racing.steering) this.setRacingAxis('steering', 0); });
-      this.element('wheel-reset')?.addEventListener('click', () => { this.wheelPointer = null; this.setRacingAxis('steering', 0); });
+      wheel.addEventListener('blur', () => this.blurSteering('wheel'));
+      this.element('wheel-reset')?.addEventListener('click', () => { this.clearSteeringSources(); this.refreshSteering(); });
     }
 
     isEditing(target, code) {
@@ -345,12 +497,12 @@
     }
 
     bind() {
-      this.element('release').addEventListener('click', () => this.stop());
+      this.element('release').addEventListener('click', () => this.stop(true));
       this.element('keyboard')?.addEventListener('change', () => this.stop());
       for (const axis of [...axes, 'clutch']) {
         this.element(`${axis}-level`)?.addEventListener('input', () => { this.text(`${axis}-value`, `${this.element(`${axis}-level`).value}%`); this.sync(); this.queueAction(); });
       }
-      this.element('racing-steering')?.addEventListener('input', () => this.setRacingAxis('steering', Number(this.element('racing-steering').value) / 100));
+      this.bindSteeringSlider();
       this.bindPedals();
       for (const tab of this.tabs) {
         tab.addEventListener('click', () => this.switchMode(tab.dataset.mode));
@@ -381,7 +533,7 @@
       window.addEventListener('keydown', (event) => {
         if (!this.available() || event.altKey || event.ctrlKey || event.metaKey) return;
         // Space 在所有模式、输入框焦点下均可释放。
-        if (event.code === 'Space') { event.preventDefault(); this.stop(); return; }
+        if (event.code === 'Space') { event.preventDefault(); this.stop(true); return; }
         if (this.mode !== 'keyboard' || this.isEditing(event.target, event.code) || !this.element('keyboard')?.checked || !this.keyControls.has(event.code)) return;
         event.preventDefault(); if (!event.repeat) this.setHeld(`key:${event.code}`, this.keyControls.get(event.code));
       });

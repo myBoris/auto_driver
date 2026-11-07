@@ -10,3 +10,4 @@ BROWSER_TOKEN = web.AppKey("browser_token", str)
 BROWSER_COOKIE = "auto_driver_dashboard"
 TERMINALS = web.AppKey("terminal_service", object)
 MEDIA = web.AppKey("media_service", object)
+PERCEPTION = web.AppKey("perception_service", object)
